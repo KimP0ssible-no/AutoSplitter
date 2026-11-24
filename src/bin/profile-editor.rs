@@ -41,11 +41,23 @@ fn texts(model: &VecModel<StandardListViewItem>) -> Vec<String> {
     model.iter().map(|i| i.text.to_string()).collect()
 }
 
-fn segment_label(s: &Segment) -> StandardListViewItem {
-    match s.pte {
-        0 => s.name.as_str().into(),
-        t => format!("{}   (blocked for {t} s)", s.name).as_str().into(),
-    }
+/// "Name · blocked 240 s · ends the run": the last segment ends the run when saved.
+fn segment_labels(segments: &[Segment]) -> Vec<StandardListViewItem> {
+    let last = segments.len().saturating_sub(1);
+    segments
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let mut label = s.name.clone();
+            if s.pte > 0 {
+                label += &format!("  \u{b7}  blocked {} s", s.pte);
+            }
+            if i == last {
+                label += "  \u{b7}  ends the run";
+            }
+            label.as_str().into()
+        })
+        .collect()
 }
 
 fn show(ed: &mut Editor) {
@@ -69,7 +81,7 @@ fn show(ed: &mut Editor) {
     ui.set_bottom(b.to_string().into());
     ed.from.set_vec(items(&p.start_from));
     ed.to.set_vec(items(&p.start_to));
-    ed.segments.set_vec(p.segments.iter().map(segment_label).collect::<Vec<_>>());
+    ed.segments.set_vec(segment_labels(&p.segments));
     ui.set_segment_current(-1);
     ed.selected = -1;
     fill_segment(ed);
@@ -129,7 +141,7 @@ fn apply_segment(ed: &mut Editor) {
     s.name = ui.get_segment_name().trim().to_string();
     s.pte = ui.get_segment_pte().trim().parse().unwrap_or(0);
     s.keywords = ui.get_segment_keywords().lines().map(str::trim).filter(|k| !k.is_empty()).map(String::from).collect();
-    ed.segments.set_row_data(i, segment_label(s));
+    ed.segments.set_row_data(i, segment_labels(&ed.profile.segments).swap_remove(i));
 }
 
 fn save(ed: &Shared, choose: bool) -> bool {
@@ -388,8 +400,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut ed = e.borrow_mut();
         apply_segment(&mut ed);
         let s = Segment { name: "New Split".into(), keywords: vec!["keyword_here".into()], is_final: false, pb: None, pte: 0 };
-        ed.segments.push(segment_label(&s));
         ed.profile.segments.push(s);
+        ed.segments.set_vec(segment_labels(&ed.profile.segments));
         let i = ed.profile.segments.len() as i32 - 1;
         if let Some(ui) = ed.ui.upgrade() {
             ui.set_segment_current(i);
@@ -403,7 +415,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let Some(ui) = ed.ui.upgrade() else { return };
         let Some(i) = usize::try_from(ui.get_segment_current()).ok().filter(|i| *i < ed.profile.segments.len()) else { return };
         ed.profile.segments.remove(i);
-        ed.segments.remove(i);
+        ed.segments.set_vec(segment_labels(&ed.profile.segments));
         ui.set_segment_current(-1);
         ed.selected = -1;
         fill_segment(&ed);
@@ -420,8 +432,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
         ed.profile.segments.swap(i as usize, j as usize);
-        let labels: Vec<_> = ed.profile.segments.iter().map(segment_label).collect();
-        ed.segments.set_vec(labels);
+        ed.segments.set_vec(segment_labels(&ed.profile.segments));
         ui.set_segment_current(j);
         ed.selected = j;
     });
