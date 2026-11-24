@@ -682,10 +682,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let a = app.clone();
     ui.on_set_region(move || {
-        let Some(ui) = a.borrow().ui.upgrade() else { return };
-        let pos = ui.window().position();
+        // The game's monitor: where the profile's region is.
+        let r = a.borrow().profile.region;
         let app = a.clone();
-        let picked = picker::pick_region((pos.x + 50, pos.y + 50), move |r| {
+        let picked = picker::pick_region((r[0], r[1]), move |r| {
             app.borrow_mut().profile.region = r;
             if let Some(ui) = app.borrow().ui.upgrade() {
                 ui.set_region(format!("{},{},{},{}", r[0], r[1], r[2], r[3]).into());

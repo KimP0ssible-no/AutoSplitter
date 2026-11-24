@@ -395,6 +395,7 @@ export component RegionPicker inherits Window {
     in-out property <length> y1;
     callback done();
     callback cancel();
+    callback next-monitor();
 
     Image { source: root.shot; width: parent.width; height: parent.height; image-fit: fill; }
     Rectangle {
@@ -414,7 +415,7 @@ export component RegionPicker inherits Window {
         background: #000000c0;
         border-radius: 4px;
         hint := Text {
-            text: "Drag around the game text. S or Enter saves, Esc cancels.";
+            text: "Drag around the game text. S or Enter saves, Tab shows the next monitor, Esc cancels.";
             color: white;
             font-size: 16px;
         }
@@ -442,6 +443,10 @@ export component RegionPicker inherits Window {
             }
             if (e.text == Key.Return || e.text == "s" || e.text == "S") {
                 root.done();
+                return accept;
+            }
+            if (e.text == Key.Tab) {
+                root.next-monitor();
                 return accept;
             }
             reject

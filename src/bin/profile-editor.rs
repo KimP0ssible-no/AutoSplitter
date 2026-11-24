@@ -342,10 +342,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let e = ed.clone();
     ui.on_set_region(move || {
-        let Some(ui) = e.borrow().ui.upgrade() else { return };
-        let pos = ui.window().position();
+        // The game's monitor: where the region typed in the form is.
+        let r = e.borrow().preview.lock().unwrap_or_else(|e| e.into_inner()).0;
         let ed = e.clone();
-        let picked = picker::pick_region((pos.x + 50, pos.y + 50), move |r| {
+        let picked = picker::pick_region((r[0], r[1]), move |r| {
             let e = ed.borrow();
             if let Some(ui) = e.ui.upgrade() {
                 ui.set_left(r[0].to_string().into());

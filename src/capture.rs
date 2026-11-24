@@ -49,6 +49,47 @@ mod dxgi {
         outputs().map(|o| o.into_iter().map(|(_, _, r)| r).collect()).unwrap_or_default()
     }
 
+    /// One picture of `m` (desktop pixels) through GDI: unlike the first frames of a new
+    /// duplication, which can be black, it is always the composed desktop.
+    pub fn grab_gdi(m: [i32; 4]) -> Result<Frame, String> {
+        use windows::Win32::Graphics::Gdi::*;
+        use windows::core::w;
+        let (w, h) = (m[2] - m[0], m[3] - m[1]);
+        let mut bgra = vec![0u8; (w * h * 4).max(0) as usize];
+        // SAFETY: a DISPLAY DC covers the whole virtual screen; every object made here is
+        // released below, and GetDIBits writes at most w * h * 4 bytes into `bgra`.
+        let lines = unsafe {
+            let screen = CreateDCW(w!("DISPLAY"), None, None, None);
+            let mem = CreateCompatibleDC(Some(screen));
+            let bitmap = CreateCompatibleBitmap(screen, w, h);
+            let old = SelectObject(mem, bitmap.into());
+            let copied = BitBlt(mem, 0, 0, w, h, Some(screen), m[0], m[1], SRCCOPY | CAPTUREBLT);
+            let mut info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    // Negative: rows top to bottom.
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let lines = if copied.is_ok() { GetDIBits(mem, bitmap, 0, h as u32, Some(bgra.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS) } else { 0 };
+            SelectObject(mem, old);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(mem);
+            let _ = DeleteDC(screen);
+            lines
+        };
+        if lines != h {
+            return Err("the screen could not be copied".into());
+        }
+        Ok(Frame { bgra, width: w as usize, height: h as usize, stride: w as usize * 4 })
+    }
+
     pub struct Capture {
         device: ID3D11Device,
         context: ID3D11DeviceContext,
@@ -143,6 +184,12 @@ mod dxgi {
                 }
                 Err(e) => return Err(err(e)),
             }
+            // Only the mouse pointer moved: no new desktop image, and copying it can give black.
+            if info.LastPresentTime == 0 {
+                // SAFETY: releases the frame acquired just above.
+                let _ = unsafe { dup.ReleaseFrame() };
+                return Ok(None);
+            }
             // SAFETY: the acquired frame is a texture on our device; the staging texture is CPU-readable
             // and Map gives RowPitch bytes for each of `height` rows.
             unsafe {
@@ -167,7 +214,7 @@ mod dxgi {
 }
 
 #[cfg(windows)]
-pub use dxgi::{Capture, monitors};
+pub use dxgi::{Capture, grab_gdi, monitors};
 
 #[cfg(not(windows))]
 pub struct Capture;
@@ -188,16 +235,54 @@ pub fn monitors() -> Vec<[i32; 4]> {
     Vec::new()
 }
 
-/// One full image of the monitor that holds `point`, and that monitor's rectangle.
-pub fn screenshot(point: (i32, i32)) -> Result<(Frame, [i32; 4]), String> {
-    let all = monitors();
-    let m = all.iter().find(|m| point.0 >= m[0] && point.0 < m[2] && point.1 >= m[1] && point.1 < m[3]).or(all.first()).copied().ok_or("no monitor found")?;
-    let mut c = Capture::new(m)?;
-    // The first frame after opening is the current desktop; a few tries cover a busy GPU.
-    for _ in 0..10 {
-        if let Some(f) = c.grab(200)? {
-            return Ok((f, m));
-        }
+#[cfg(not(windows))]
+pub fn grab_gdi(_m: [i32; 4]) -> Result<Frame, String> {
+    Err("screen capture needs Windows".into())
+}
+
+fn contains(m: &[i32; 4], (x, y): (i32, i32)) -> bool {
+    x >= m[0] && x < m[2] && y >= m[1] && y < m[3]
+}
+
+/// The monitor that holds `point`, else the primary monitor (the one at 0,0).
+pub fn monitor_at(point: (i32, i32)) -> Option<[i32; 4]> {
+    pick(&monitors(), point)
+}
+
+fn pick(all: &[[i32; 4]], point: (i32, i32)) -> Option<[i32; 4]> {
+    all.iter().find(|m| contains(m, point)).or(all.iter().find(|m| contains(m, (0, 0)))).or(all.first()).copied()
+}
+
+/// The monitor after `m`, left to right, wrapping around.
+pub fn next_monitor(m: [i32; 4]) -> [i32; 4] {
+    after(monitors(), m)
+}
+
+fn after(mut all: Vec<[i32; 4]>, m: [i32; 4]) -> [i32; 4] {
+    all.sort_by_key(|r| (r[0], r[1]));
+    all.iter().position(|r| *r == m).and_then(|i| all.get((i + 1) % all.len())).copied().unwrap_or(m)
+}
+
+/// One full image of monitor `m`.
+pub fn screenshot(m: [i32; 4]) -> Result<Frame, String> {
+    grab_gdi(m)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_choice() {
+        // Primary at 0,0, a second screen to its left, a third to its right.
+        let (primary, left, right) = ([0, 0, 2560, 1440], [-1920, 0, 0, 1080], [2560, 0, 5120, 1440]);
+        let all = vec![primary, right, left];
+        assert_eq!(pick(&all, (441, 60)), Some(primary));
+        assert_eq!(pick(&all, (-100, 500)), Some(left));
+        assert_eq!(pick(&all, (9000, 9000)), Some(primary), "off-screen regions open on the primary monitor");
+        assert_eq!(pick(&[], (0, 0)), None);
+        assert_eq!(after(all.clone(), left), primary);
+        assert_eq!(after(all.clone(), right), left, "wraps around");
+        assert_eq!(after(vec![primary], primary), primary);
     }
-    Err("the screen did not deliver an image".into())
 }
