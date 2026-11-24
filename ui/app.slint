@@ -30,6 +30,8 @@ export global Theme {
 component MetalPanel inherits Rectangle {
     in property <string> title;
     in property <length> inset: 10px;
+    // Only the panels that say so take spare height (the log, the editor's lists).
+    vertical-stretch: 0;
     background: Theme.panel;
     border-radius: 8px;
     border-width: 1px;
@@ -228,9 +230,10 @@ export component MainWindow inherits Window {
         MetalPanel {
             title: "SPLITS";
             inset: 8px;
+            // As tall as the splits, up to 12 rows; more scroll.
             ScrollView {
-                height: 7 * 25px + 26px;
-                Splits { rows: root.rows; active: root.active-row; }
+                height: min(table.preferred-height, 12 * 25px + 26px);
+                table := Splits { rows: root.rows; active: root.active-row; }
             }
         }
 
