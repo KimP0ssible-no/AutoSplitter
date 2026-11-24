@@ -1,4 +1,4 @@
-import { Button, LineEdit, SpinBox, CheckBox, Slider, ComboBox, StandardListView, TextEdit, GroupBox, ListView, ScrollView, Palette, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, SpinBox, CheckBox, Slider, ComboBox, StandardListView, TextEdit, ListView, ScrollView } from "std-widgets.slint";
 
 export struct Row {
     name: string,
@@ -10,41 +10,126 @@ export struct Row {
     sign: int,
 }
 
-export global Colors {
+// Brushed steel: dark gunmetal behind, lighter panels with a lit top edge.
+export global Theme {
+    out property <brush> window: @linear-gradient(180deg, #2c3137 0%, #1b1e22 60%, #15171a 100%);
+    out property <brush> panel: @linear-gradient(180deg, #3a3f47 0%, #2d3138 45%, #25292e 100%);
+    out property <brush> brushed: @linear-gradient(90deg, #474e57 0%, #5b636d 16%, #444a52 34%, #58606a 55%, #40464e 76%, #535a63 100%);
+    out property <color> edge-light: #ffffff2e;
+    out property <color> edge-dark: #0000008c;
+    out property <color> text: #e9edf2;
+    out property <color> dim: #a7b1bc;
+    out property <color> accent: #7cc4ff;
     out property <color> green: #4ade80;
     out property <color> gold: #f5c542;
     out property <color> red: #f87171;
-    out property <color> dim: #9ca3af;
+    out property <string> mono: "Consolas";
 }
 
-component Cell inherits Text {
-    width: 64px;
-    horizontal-alignment: right;
+// A raised metal plate with an optional small caps title.
+component MetalPanel inherits Rectangle {
+    in property <string> title;
+    in property <length> inset: 10px;
+    background: Theme.panel;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Theme.edge-dark;
+    drop-shadow-blur: 8px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #00000070;
+    Rectangle {
+        x: 8px;
+        y: 1px;
+        width: parent.width - 16px;
+        height: 1px;
+        background: Theme.edge-light;
+    }
+    VerticalLayout {
+        padding: root.inset;
+        spacing: 8px;
+        if root.title != "": Text {
+            text: root.title;
+            color: Theme.dim;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+        }
+        @children
+    }
+}
+
+// Text that stays readable over any game scene when `outline` is on.
+component Label inherits Text {
+    in property <bool> outline;
     vertical-alignment: center;
+    stroke: root.outline ? #000000d8 : transparent;
+    stroke-width: root.outline ? 2px : 0px;
+    stroke-style: outside;
+}
+
+component Cell inherits Label {
+    width: 76px;
+    horizontal-alignment: right;
+    font-family: Theme.mono;
+}
+
+// Stopped, waiting, running or complete, in words as well as colour.
+component StatusBadge inherits Rectangle {
+    in property <int> state;
+    property <color> tint: root.state == 3 ? Theme.gold : root.state == 2 ? Theme.green : root.state == 1 ? Theme.accent : Theme.dim;
+    border-radius: self.height / 2;
+    background: root.tint.with-alpha(0.16);
+    border-width: 1px;
+    border-color: root.tint.with-alpha(0.7);
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        Text {
+            text: root.state == 3 ? "RUN COMPLETE" : root.state == 2 ? "RUNNING" : root.state == 1 ? "WAITING FOR THE START TRIGGER" : "STOPPED";
+            color: root.tint;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+    }
 }
 
 component Splits inherits VerticalLayout {
     in property <[Row]> rows;
     in property <int> active: -1;
-    in property <color> fg: Palette.foreground;
-    in property <length> size: 13px;
-    in property <length> row-height: 20px;
-    spacing: 2px;
+    in property <color> fg: Theme.text;
+    in property <length> size: 14px;
+    in property <length> row-height: 24px;
+    in property <bool> outline;
+    spacing: 1px;
     HorizontalLayout {
         spacing: 8px;
-        Text { text: "Segment"; horizontal-stretch: 1; color: Colors.dim; font-size: root.size; }
-        for h in ["Split", "Total", "PB", "+/-"]: Cell { text: h; color: Colors.dim; font-size: root.size; }
+        padding-left: 10px;
+        padding-right: 6px;
+        Label { text: "SEGMENT"; horizontal-stretch: 1; color: Theme.dim; font-size: root.size * 0.78; font-weight: 700; outline: root.outline; }
+        for h in ["SPLIT", "TOTAL", "PB", "+/-"]: Cell { text: h; color: Theme.dim; font-size: root.size * 0.78; font-weight: 700; font-family: ""; outline: root.outline; }
     }
     for r[i] in root.rows: Rectangle {
         height: root.row-height;
-        background: i == root.active ? #ffffff1c : transparent;
+        border-radius: 4px;
+        background: i == root.active ? Theme.accent.with-alpha(0.2) : mod(i, 2) == 0 ? #ffffff09 : transparent;
+        Rectangle {
+            x: 0;
+            width: 3px;
+            border-radius: 1.5px;
+            background: i == root.active ? Theme.accent : transparent;
+        }
         HorizontalLayout {
             spacing: 8px;
-            Text { text: r.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: root.fg; font-size: root.size; }
-            Cell { text: r.split; color: root.fg; font-size: root.size; }
-            Cell { text: r.total; color: root.fg; font-size: root.size; }
-            Cell { text: r.pb; color: Colors.dim; font-size: root.size; }
-            Cell { text: r.delta; font-size: root.size; color: r.sign < 0 ? Colors.green : r.sign > 0 ? Colors.red : Colors.dim; }
+            padding-left: 10px;
+            padding-right: 6px;
+            Label { text: r.name; horizontal-stretch: 1; overflow: elide; color: root.fg; font-size: root.size; font-weight: i == root.active ? 600 : 400; outline: root.outline; }
+            Cell { text: r.split; color: root.fg; font-size: root.size; outline: root.outline; }
+            Cell { text: r.total; color: root.fg; font-size: root.size; outline: root.outline; }
+            Cell { text: r.pb; color: Theme.dim; font-size: root.size; outline: root.outline; }
+            Cell { text: r.delta; font-size: root.size; outline: root.outline; color: r.sign < 0 ? Theme.green : r.sign > 0 ? Theme.red : Theme.dim; }
         }
     }
 }
@@ -52,14 +137,16 @@ component Splits inherits VerticalLayout {
 export component MainWindow inherits Window {
     title: "AutoSplitter " + root.version;
     icon: @image-url("../packaging/icons/autosplitter.png");
-    preferred-width: 820px;
-    preferred-height: 760px;
+    background: Theme.window;
+    preferred-width: 860px;
+    preferred-height: 900px;
     in property <string> version;
     in property <string> heading;
     in property <string> timer: "0:00.000";
     // 0 green, 1 gold (run complete).
     in property <int> timer-state;
-    in property <string> status: "Stopped";
+    // 0 stopped, 1 waiting for the start trigger, 2 running, 3 complete.
+    in property <int> run-state;
     in property <[Row]> rows;
     in property <int> active-row: -1;
     in property <bool> running;
@@ -98,117 +185,154 @@ export component MainWindow inherits Window {
     callback overlay-changed();
     callback debug-changed();
 
-    VerticalBox {
-        HorizontalLayout {
-            spacing: 12px;
-            VerticalLayout {
-                horizontal-stretch: 1;
-                Text { text: root.heading; font-size: 18px; font-weight: 600; overflow: elide; }
-                Text { text: root.status; color: Colors.dim; }
-            }
-            Text {
-                text: root.timer;
-                font-size: 40px;
-                font-family: "Consolas";
-                color: root.timer-state == 1 ? Colors.gold : Colors.green;
-                horizontal-alignment: right;
-            }
-        }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
 
+        // Brushed-steel header: what runs, its state, and the clock.
         Rectangle {
+            background: Theme.brushed;
+            border-radius: 10px;
             border-width: 1px;
-            border-color: Palette.border;
-            border-radius: 4px;
-            height: 7 * 22px + 26px;
+            border-color: Theme.edge-dark;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: #00000080;
+            Rectangle { x: 10px; y: 1px; width: parent.width - 20px; height: 1px; background: #ffffff40; }
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 16px;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    Text { text: root.heading; font-size: 20px; font-weight: 700; color: Theme.text; overflow: elide; }
+                    HorizontalLayout {
+                        alignment: LayoutAlignment.start;
+                        StatusBadge { state: root.run-state; }
+                    }
+                }
+                Text {
+                    text: root.timer;
+                    font-size: 52px;
+                    font-family: Theme.mono;
+                    font-weight: 700;
+                    color: root.timer-state == 1 ? Theme.gold : Theme.green;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        MetalPanel {
+            title: "SPLITS";
+            inset: 8px;
             ScrollView {
-                Splits { rows: root.rows; active: root.active-row; row-height: 20px; padding: 4px; }
+                height: 7 * 25px + 26px;
+                Splits { rows: root.rows; active: root.active-row; }
             }
         }
 
         HorizontalLayout {
-            spacing: 6px;
-            Button { text: "Start (F9)"; enabled: !root.running; clicked => { root.start(); } }
+            spacing: 8px;
+            Button { text: "Start (F9)"; primary: true; enabled: !root.running; clicked => { root.start(); } }
             Button { text: "Reset (F10)"; clicked => { root.reset(); } }
             Button { text: "Stop (F11)"; enabled: root.running; clicked => { root.stop(); } }
             Button { text: "Set Region"; enabled: !root.running; clicked => { root.set-region(); } }
-            Text { text: "Region: " + root.region; vertical-alignment: center; color: Colors.dim; horizontal-stretch: 1; }
+            Text { text: "Region  " + root.region; vertical-alignment: center; horizontal-alignment: right; color: Theme.dim; font-family: Theme.mono; horizontal-stretch: 1; }
         }
 
-        GroupBox {
-            title: "Settings";
-            vertical-stretch: 0;
-            VerticalLayout {
+        MetalPanel {
+            title: "PROFILE";
+            HorizontalLayout {
                 spacing: 6px;
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text { text: "Profile"; vertical-alignment: center; }
-                    ComboBox {
-                        horizontal-stretch: 1;
-                        model: root.profiles;
-                        current-index <=> root.profile-index;
-                        selected => { root.select-profile(self.current-index); }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.profiles;
+                    current-index <=> root.profile-index;
+                    selected => { root.select-profile(self.current-index); }
+                }
+                Button { text: "Browse"; clicked => { root.browse(); } }
+                Button { text: "Edit"; clicked => { root.edit(); } }
+                Button { text: "Reload"; clicked => { root.reload(); } }
+                Button { text: "New"; clicked => { root.new-profile(); } }
+                Button { text: "Delete"; clicked => { root.delete-profile(); } }
+                Button { text: "Save Settings"; primary: true; clicked => { root.save-settings(); } }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            MetalPanel {
+                title: "DETECTION";
+                horizontal-stretch: 1;
+                GridLayout {
+                    spacing: 8px;
+                    Row {
+                        Text { text: "FPS"; vertical-alignment: center; }
+                        SpinBox { minimum: 1; maximum: 30; value <=> root.fps; width: 104px; }
+                        Text { text: "Retries"; vertical-alignment: center; }
+                        SpinBox { minimum: 1; maximum: max(1, root.fps - 1); value <=> root.retries; width: 104px; }
                     }
-                    Button { text: "Browse"; clicked => { root.browse(); } }
-                    Button { text: "Edit"; clicked => { root.edit(); } }
-                    Button { text: "Reload"; clicked => { root.reload(); } }
-                    Button { text: "New"; clicked => { root.new-profile(); } }
-                    Button { text: "Delete"; clicked => { root.delete-profile(); } }
+                    Row {
+                        Text { text: "Interval (s)"; vertical-alignment: center; }
+                        LineEdit { text <=> root.interval; input-type: decimal; width: 104px; }
+                        Text { text: "Match %"; vertical-alignment: center; }
+                        SpinBox { minimum: 50; maximum: 100; value <=> root.match-percent; width: 104px; }
+                    }
+                    Row {
+                        Text { text: "PB protection (s)"; vertical-alignment: center; }
+                        SpinBox { minimum: 0; maximum: 36000; value <=> root.pb-protection; width: 104px; }
+                        CheckBox { text: "Debug log"; checked <=> root.debug; toggled => { root.debug-changed(); } colspan: 2; }
+                    }
                 }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text { text: "FPS"; vertical-alignment: center; }
-                    SpinBox { minimum: 1; maximum: 30; value <=> root.fps; width: 80px; }
-                    Text { text: "Retries"; vertical-alignment: center; }
-                    SpinBox { minimum: 1; maximum: max(1, root.fps - 1); value <=> root.retries; width: 80px; }
-                    Text { text: "Interval (s)"; vertical-alignment: center; }
-                    LineEdit { text <=> root.interval; width: 56px; input-type: decimal; }
-                    Text { text: "Match %"; vertical-alignment: center; }
-                    SpinBox { minimum: 50; maximum: 100; value <=> root.match-percent; width: 80px; }
-                    Text { text: "PB protection (s)"; vertical-alignment: center; }
-                    SpinBox { minimum: 0; maximum: 36000; value <=> root.pb-protection; width: 90px; }
-                    CheckBox { text: "Debug"; checked <=> root.debug; toggled => { root.debug-changed(); } }
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    CheckBox { text: "LiveSplit"; checked <=> root.livesplit; }
-                    LineEdit { text <=> root.livesplit-host; width: 120px; enabled: root.livesplit; }
-                    LineEdit { text <=> root.livesplit-port; width: 64px; input-type: number; enabled: root.livesplit; }
-                    CheckBox { text: "Overlay"; checked <=> root.overlay; toggled => { root.overlay-changed(); } }
-                    Slider { minimum: 0; maximum: 100; value <=> root.overlay-opacity; width: 100px; changed => { root.overlay-changed(); } }
-                    Text { text: "Split key"; vertical-alignment: center; }
-                    Button { text: root.binding ? "Press a key…" : root.split-key; clicked => { root.bind-key(); } }
-                    Rectangle { horizontal-stretch: 1; }
-                    Button { text: "Save Settings"; primary: true; clicked => { root.save-settings(); } }
+            }
+            MetalPanel {
+                title: "INTEGRATIONS";
+                horizontal-stretch: 1;
+                GridLayout {
+                    spacing: 8px;
+                    Row {
+                        CheckBox { text: "LiveSplit"; checked <=> root.livesplit; }
+                        LineEdit { text <=> root.livesplit-host; enabled: root.livesplit; min-width: 110px; horizontal-stretch: 1; }
+                        LineEdit { text <=> root.livesplit-port; input-type: number; enabled: root.livesplit; width: 76px; }
+                    }
+                    Row {
+                        CheckBox { text: "Overlay"; checked <=> root.overlay; toggled => { root.overlay-changed(); } }
+                        Slider { minimum: 0; maximum: 100; value <=> root.overlay-opacity; changed => { root.overlay-changed(); } colspan: 2; }
+                    }
+                    Row {
+                        Text { text: "Split key"; vertical-alignment: center; }
+                        Button { text: root.binding ? "Press a key…" : root.split-key; clicked => { root.bind-key(); } colspan: 2; }
+                    }
                 }
             }
         }
 
-        GroupBox {
-            title: "OCR Output";
-            vertical-stretch: 0;
+        MetalPanel {
+            title: "OCR OUTPUT";
             HorizontalLayout {
                 spacing: 6px;
                 ocr := LineEdit { text: root.ocr-text; read-only: true; horizontal-stretch: 1; }
-                Text { text: root.ocr-ms; color: Colors.dim; vertical-alignment: center; }
+                Text { text: root.ocr-ms; color: Theme.dim; vertical-alignment: center; font-family: Theme.mono; }
                 Button { text: "Copy"; clicked => { ocr.select-all(); ocr.copy(); } }
             }
         }
 
-        Rectangle {
+        MetalPanel {
+            title: "LOG";
             vertical-stretch: 1;
-            min-height: 120px;
-            border-width: 1px;
-            border-color: Palette.border;
-            border-radius: 4px;
-            log-view := ListView {
-                for line in root.log: Text { text: line; font-family: "Consolas"; font-size: 12px; overflow: elide; }
+            min-height: 140px;
+            inset: 8px;
+            ListView {
+                for line in root.log: Text { text: line; font-family: Theme.mono; font-size: 13px; color: Theme.text; overflow: elide; }
                 changed content-height => { self.content-y = min(0px, self.visible-height - self.content-height); }
             }
         }
     }
 }
 
-// Found by its title when the window is created (see app.rs).
+// Found by its title when the window is created (see main.rs).
 export component Overlay inherits Window {
     title: "AutoSplitter Overlay";
     no-frame: true;
@@ -222,32 +346,39 @@ export component Overlay inherits Window {
     in property <string> pb-total;
     in property <float> bg-opacity: 80;
     callback drag();
-    width: 460px;
+    width: 620px;
 
+    // The plate fades with the opacity setting; the outlined text above it does not.
     Rectangle {
-        background: #0e1217.with-alpha(root.bg-opacity / 100);
-        border-radius: 6px;
-        TouchArea {
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                    root.drag();
-                }
+        opacity: root.bg-opacity / 100;
+        background: Theme.panel;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.edge-dark;
+        Rectangle { x: 10px; y: 1px; width: parent.width - 20px; height: 1px; background: Theme.edge-light; }
+    }
+    TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.drag();
             }
         }
-        VerticalLayout {
-            padding: 8px;
-            spacing: 2px;
-            Text { text: root.heading; color: white; font-size: 12px; font-weight: 600; overflow: elide; }
-            Splits { rows: root.rows; active: root.active-row; fg: white; size: 12px; row-height: 18px; }
-            Text {
-                text: root.timer;
-                font-size: 32px;
-                font-family: "Consolas";
-                horizontal-alignment: right;
-                color: root.timer-state == 1 ? Colors.gold : Colors.green;
-            }
-            Text { text: "Personal Best  " + root.pb-total; color: Colors.dim; font-size: 12px; horizontal-alignment: right; }
+    }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 4px;
+        Label { text: root.heading; color: Theme.text; font-size: 16px; font-weight: 700; overflow: elide; outline: true; }
+        Splits { rows: root.rows; active: root.active-row; size: 17px; row-height: 27px; outline: true; }
+        Label {
+            text: root.timer;
+            font-size: 50px;
+            font-family: Theme.mono;
+            font-weight: 700;
+            horizontal-alignment: right;
+            color: root.timer-state == 1 ? Theme.gold : Theme.green;
+            outline: true;
         }
+        Label { text: "Personal best  " + root.pb-total; color: Theme.text; font-size: 15px; horizontal-alignment: right; outline: true; }
     }
 }
 
@@ -272,7 +403,7 @@ export component RegionPicker inherits Window {
         width: abs(root.x1 - root.x0);
         height: abs(root.y1 - root.y0);
         border-width: 2px;
-        border-color: touch.pressed ? Colors.red : Colors.green;
+        border-color: touch.pressed ? Theme.red : Theme.green;
         background: #ffffff14;
     }
     Rectangle {
@@ -318,31 +449,29 @@ export component RegionPicker inherits Window {
     }
 }
 
-component KeywordList inherits GroupBox {
+component KeywordList inherits MetalPanel {
     in property <[StandardListViewItem]> items;
     in-out property <int> current: -1;
     in-out property <string> entry;
     callback add();
     callback remove();
     callback copy-ocr();
-    VerticalLayout {
+    StandardListView { model: root.items; current-item <=> root.current; min-height: 96px; vertical-stretch: 1; }
+    HorizontalLayout {
         spacing: 4px;
-        StandardListView { model: root.items; current-item <=> root.current; min-height: 72px; vertical-stretch: 1; }
-        HorizontalLayout {
-            spacing: 4px;
-            LineEdit { text <=> root.entry; horizontal-stretch: 1; accepted => { root.add(); } }
-            Button { text: "Add"; clicked => { root.add(); } }
-            Button { text: "Remove"; enabled: root.current >= 0; clicked => { root.remove(); } }
-            Button { text: "Copy OCR"; clicked => { root.copy-ocr(); } }
-        }
+        LineEdit { text <=> root.entry; placeholder-text: "Keyword"; horizontal-stretch: 1; accepted => { root.add(); } }
+        Button { text: "Add"; clicked => { root.add(); } }
+        Button { text: "Remove"; enabled: root.current >= 0; clicked => { root.remove(); } }
+        Button { text: "Copy OCR"; clicked => { root.copy-ocr(); } }
     }
 }
 
 export component EditorWindow inherits Window {
     title: "AutoSplitter Profile Editor " + root.version + (root.file == "" ? "" : " - " + root.file);
     icon: @image-url("../packaging/icons/autosplitter.png");
-    preferred-width: 900px;
-    preferred-height: 820px;
+    background: Theme.window;
+    preferred-width: 940px;
+    preferred-height: 900px;
     in property <string> version;
     in property <string> file;
     in-out property <string> game;
@@ -392,18 +521,44 @@ export component EditorWindow inherits Window {
     callback move-segment(int);
     callback ocr-to-segment();
 
-    VerticalBox {
-        HorizontalLayout {
-            spacing: 6px;
-            Button { text: "New"; clicked => { root.new-file(); } }
-            Button { text: "Open"; clicked => { root.open-file(); } }
-            Button { text: "Save"; primary: true; clicked => { root.save(); } }
-            Button { text: "Save As"; clicked => { root.save-as(); } }
-            Rectangle { horizontal-stretch: 1; }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        Rectangle {
+            background: Theme.brushed;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.edge-dark;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: #00000080;
+            Rectangle { x: 10px; y: 1px; width: parent.width - 20px; height: 1px; background: #ffffff40; }
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.game == "" && root.mission == "" ? "New profile" : root.game + " \u{2014} " + root.mission;
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Text { text: root.file == "" ? "Not saved yet" : root.file; font-size: 12px; color: Theme.text; overflow: elide; }
+                }
+                Button { text: "New"; clicked => { root.new-file(); } }
+                Button { text: "Open"; clicked => { root.open-file(); } }
+                Button { text: "Save"; primary: true; clicked => { root.save(); } }
+                Button { text: "Save As"; clicked => { root.save-as(); } }
+            }
         }
-        GroupBox {
-            title: "Profile";
-            vertical-stretch: 0;
+
+        MetalPanel {
+            title: "PROFILE";
             HorizontalLayout {
                 spacing: 6px;
                 Text { text: "Game"; vertical-alignment: center; }
@@ -412,59 +567,60 @@ export component EditorWindow inherits Window {
                 LineEdit { text <=> root.mission; horizontal-stretch: 1; }
             }
         }
-        GroupBox {
-            title: "Capture / OCR";
-            vertical-stretch: 0;
-            VerticalLayout {
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 6px;
+
+        MetalPanel {
+            title: "CAPTURE AND OCR";
+            GridLayout {
+                spacing: 8px;
+                Row {
                     Text { text: "FPS"; vertical-alignment: center; }
-                    SpinBox { minimum: 1; maximum: 30; value <=> root.fps; width: 80px; }
-                    Text { text: "Interval (s)"; vertical-alignment: center; }
-                    LineEdit { text <=> root.interval; width: 56px; input-type: decimal; }
-                    Text { text: "Match %"; vertical-alignment: center; }
-                    SpinBox { minimum: 50; maximum: 100; value <=> root.match-percent; width: 80px; }
+                    SpinBox { minimum: 1; maximum: 30; value <=> root.fps; width: 104px; }
                     Text { text: "Retries"; vertical-alignment: center; }
-                    SpinBox { minimum: 1; maximum: max(1, root.fps - 1); value <=> root.retries; width: 80px; }
+                    SpinBox { minimum: 1; maximum: max(1, root.fps - 1); value <=> root.retries; width: 104px; }
+                    Text { text: "Match %"; vertical-alignment: center; }
+                    SpinBox { minimum: 50; maximum: 100; value <=> root.match-percent; width: 104px; }
+                }
+                Row {
+                    Text { text: "Interval (s)"; vertical-alignment: center; }
+                    LineEdit { text <=> root.interval; input-type: decimal; width: 104px; }
                     Text { text: "Cooldown (s)"; vertical-alignment: center; }
-                    LineEdit { text <=> root.cooldown; width: 56px; input-type: decimal; }
+                    LineEdit { text <=> root.cooldown; input-type: decimal; width: 104px; }
                     Text { text: "PB protection (s)"; vertical-alignment: center; }
-                    SpinBox { minimum: 0; maximum: 36000; value <=> root.pb-protection; width: 90px; }
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text { text: "Language"; vertical-alignment: center; }
-                    ComboBox {
-                        model: ["English (en)", "Simplified Chinese (zh-CN)"];
-                        current-index <=> root.language;
-                        selected => { root.language-changed(); }
-                    }
-                    Text { text: "Region L"; vertical-alignment: center; }
-                    LineEdit { text <=> root.left; width: 64px; input-type: number; edited => { root.region-edited(); } }
-                    Text { text: "T"; vertical-alignment: center; }
-                    LineEdit { text <=> root.top; width: 64px; input-type: number; edited => { root.region-edited(); } }
-                    Text { text: "R"; vertical-alignment: center; }
-                    LineEdit { text <=> root.right; width: 64px; input-type: number; edited => { root.region-edited(); } }
-                    Text { text: "B"; vertical-alignment: center; }
-                    LineEdit { text <=> root.bottom; width: 64px; input-type: number; edited => { root.region-edited(); } }
-                    Button { text: "Set Region"; clicked => { root.set-region(); } }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text { text: "OCR:"; color: Colors.dim; vertical-alignment: center; }
-                    ocr := LineEdit { text: root.ocr-text; read-only: true; horizontal-stretch: 1; }
-                    Text { text: root.ocr-ms; color: Colors.dim; vertical-alignment: center; }
-                    Button { text: "Copy"; clicked => { ocr.select-all(); ocr.copy(); } }
+                    SpinBox { minimum: 0; maximum: 36000; value <=> root.pb-protection; width: 104px; }
                 }
             }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: "Language"; vertical-alignment: center; }
+                ComboBox {
+                    model: ["English (en)", "Simplified Chinese (zh-CN)"];
+                    current-index <=> root.language;
+                    selected => { root.language-changed(); }
+                    width: 230px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "Region"; vertical-alignment: center; }
+                LineEdit { text <=> root.left; placeholder-text: "Left"; input-type: number; width: 72px; edited => { root.region-edited(); } }
+                LineEdit { text <=> root.top; placeholder-text: "Top"; input-type: number; width: 72px; edited => { root.region-edited(); } }
+                LineEdit { text <=> root.right; placeholder-text: "Right"; input-type: number; width: 72px; edited => { root.region-edited(); } }
+                LineEdit { text <=> root.bottom; placeholder-text: "Bottom"; input-type: number; width: 72px; edited => { root.region-edited(); } }
+                Button { text: "Set Region"; clicked => { root.set-region(); } }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: "Live OCR"; color: Theme.dim; vertical-alignment: center; }
+                ocr := LineEdit { text: root.ocr-text; read-only: true; horizontal-stretch: 1; }
+                Text { text: root.ocr-ms; color: Theme.dim; vertical-alignment: center; font-family: Theme.mono; }
+                Button { text: "Copy"; clicked => { ocr.select-all(); ocr.copy(); } }
+            }
         }
+
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 10px;
             vertical-stretch: 1;
             KeywordList {
-                title: "Start trigger: From (empty starts on To alone)";
+                title: "START TRIGGER: FROM (EMPTY STARTS ON TO ALONE)";
+                horizontal-stretch: 1;
                 items: root.from-items;
                 current <=> root.from-current;
                 entry <=> root.from-entry;
@@ -473,7 +629,8 @@ export component EditorWindow inherits Window {
                 copy-ocr => { root.ocr-to-from(); }
             }
             KeywordList {
-                title: "Start trigger: To";
+                title: "START TRIGGER: TO";
+                horizontal-stretch: 1;
                 items: root.to-items;
                 current <=> root.to-current;
                 entry <=> root.to-entry;
@@ -482,11 +639,12 @@ export component EditorWindow inherits Window {
                 copy-ocr => { root.ocr-to-to(); }
             }
         }
-        GroupBox {
-            title: "Segments (the last one ends the run)";
+
+        MetalPanel {
+            title: "SEGMENTS (THE LAST ONE ENDS THE RUN)";
             vertical-stretch: 2;
             HorizontalLayout {
-                spacing: 6px;
+                spacing: 10px;
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
@@ -505,7 +663,7 @@ export component EditorWindow inherits Window {
                     }
                 }
                 VerticalLayout {
-                    spacing: 4px;
+                    spacing: 6px;
                     horizontal-stretch: 1;
                     HorizontalLayout {
                         spacing: 6px;
@@ -514,7 +672,7 @@ export component EditorWindow inherits Window {
                         Text { text: "Blocked for (s)"; vertical-alignment: center; }
                         LineEdit { text <=> root.segment-pte; width: 64px; input-type: number; }
                     }
-                    Text { text: "Keywords, one per line (any one matches):"; color: Colors.dim; }
+                    Text { text: "Keywords, one per line. Any one of them matches."; color: Theme.dim; }
                     TextEdit { text <=> root.segment-keywords; vertical-stretch: 1; }
                     HorizontalLayout {
                         spacing: 4px;

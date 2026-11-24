@@ -372,7 +372,7 @@ fn start(app: &Shared) {
     a.start = None;
     let debug = a.ui.upgrade().is_some_and(|ui| {
         ui.set_running(true);
-        ui.set_status("Waiting for the start trigger".into());
+        ui.set_run_state(1);
         ui.get_debug()
     });
     let _ = a.cmd.send(Cmd::Start(Box::new(a.profile.clone()), debug));
@@ -404,7 +404,7 @@ fn handle(app: &Shared, ev: Ev) {
                 a.start = Some(at);
                 set_active(&a, 0);
                 if let Some(ui) = a.ui.upgrade() {
-                    ui.set_status("Running".into());
+                    ui.set_run_state(2);
                 }
             }
             log(app, &format!("Timer started: {}", one_line(&text)));
@@ -441,7 +441,7 @@ fn handle(app: &Shared, ev: Ev) {
             a.start = None;
             show_segments(&a);
             if let Some(ui) = a.ui.upgrade() {
-                ui.set_status("Waiting for the start trigger".into());
+                ui.set_run_state(1);
             }
         }
         Ev::Stopped => {
@@ -450,7 +450,7 @@ fn handle(app: &Shared, ev: Ev) {
             a.start = None;
             if let Some(ui) = a.ui.upgrade() {
                 ui.set_running(false);
-                ui.set_status("Stopped".into());
+                ui.set_run_state(0);
             }
         }
         Ev::Update(tag, notes) => offer_update(app, &tag, &notes),
@@ -463,7 +463,7 @@ fn run_complete(app: &Shared, total: f64, times: Vec<Option<f64>>) {
         a.start = None;
         set_clock(&a, &fmt_time(total), true);
         if let Some(ui) = a.ui.upgrade() {
-            ui.set_status("Complete".into());
+            ui.set_run_state(3);
         }
         (a.profile.segments.last().and_then(|s| s.pb), a.profile.pb_protection_seconds)
     };

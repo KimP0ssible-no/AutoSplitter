@@ -25,9 +25,9 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (out, scene) = (args[0].clone(), args.get(1).cloned().unwrap_or("main".into()));
     let (width, height) = match scene.as_str() {
-        "overlay" => (460, 260),
-        "editor" => (900, 820),
-        _ => (820, 760),
+        "overlay" => (620, 390),
+        "editor" => (940, 900),
+        _ => (860, 900),
     };
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
@@ -79,7 +79,14 @@ fn main() {
             let list = |v: &[String]| model(v.iter().map(|s| StandardListViewItem::from(s.as_str())).collect());
             e.set_from_items(list(&p.start_from));
             e.set_to_items(list(&p.start_to));
-            e.set_segment_items(list(&p.segments.iter().map(|s| s.name.clone()).collect::<Vec<_>>()));
+            let last = p.segments.len() - 1;
+            let labels: Vec<String> = p
+                .segments
+                .iter()
+                .enumerate()
+                .map(|(i, s)| format!("{}{}{}", s.name, if s.pte > 0 { format!("  \u{b7}  blocked {} s", s.pte) } else { String::new() }, if i == last { "  \u{b7}  ends the run" } else { "" }))
+                .collect();
+            e.set_segment_items(list(&labels));
             e.set_segment_current(1);
             e.set_segment_name(p.segments[1].name.as_str().into());
             e.set_segment_keywords(p.segments[1].keywords.join("\n").into());
@@ -90,7 +97,7 @@ fn main() {
             let ui = MainWindow::new().unwrap();
             ui.set_version("2.0.0".into());
             ui.set_heading(p.display_name().into());
-            ui.set_status("Running".into());
+            ui.set_run_state(2);
             ui.set_timer("2:41.380".into());
             ui.set_rows(model(rows));
             ui.set_active_row(3);
