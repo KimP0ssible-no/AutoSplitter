@@ -295,6 +295,34 @@ jobs:
             target/*.zip
           if-no-files-found: error
 
+  # The newest main build as the draft release v0.0.0, replaced on every
+  # push: drafts stay mutable while published releases are immutable, only
+  # collaborators see them, and the update check never offers them.
+  test-build:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: autosplitter-windows
+          path: artifacts
+      - name: Replace the draft v0.0.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          draft=$(gh release view v0.0.0 --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          case "$draft" in
+            true) gh release delete v0.0.0 --repo "$GITHUB_REPOSITORY" --yes ;;
+            none) ;;
+            *) echo "::error::v0.0.0 is a published release; only a draft is replaced"; exit 1 ;;
+          esac
+          printf 'Unsigned test build of %s (%s), not a release.\n' "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > notes.md
+          gh release create v0.0.0 --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "Test build ${GITHUB_SHA:0:7}" --notes-file notes.md $(find artifacts -type f)
+
   # The one check main requires: everything passed, or was skipped because
   # the pull request only changes documentation.
   ci-ok:
