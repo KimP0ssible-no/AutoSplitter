@@ -7,14 +7,22 @@ on:
     tags: ['v*']
   pull_request:
     types: [opened, synchronize, reopened]
+  # "Run workflow" on main: a test build, signed if asked, put in the draft v0.0.0.
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Sign the programs and the setup (waits for approval of the release environment)
+        type: boolean
+        default: true
 
 # Read-only unless a job says otherwise (release).
 permissions:
   contents: read
 
-# A newer merge makes an older main run moot; other runs never cancel.
+# A newer merge makes an older main run moot; other runs (tags, signed test
+# builds waiting for approval) never cancel.
 concurrency:
-  group: ${{ github.ref == 'refs/heads/main' && 'ci-main' || github.run_id }}
+  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'ci-main' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -133,16 +141,17 @@ jobs:
         with:
           command-arguments: advisories
 
-  # The setup program and the portable zip. On a release tag the programs, the
-  # setup and its uninstaller are signed; the job then waits for approval of
-  # the "release" environment, which holds the Certum login.
+  # The setup program and the portable zip. On a release tag, or a test build
+  # run by hand with "sign", the programs, the setup and its uninstaller are
+  # signed; the job then waits for approval of the "release" environment,
+  # which holds the Certum login.
   package:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
-    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
+    environment: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.sign == true) && 'release' || '' }}
     env:
-      SIGN: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      SIGN: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.sign == true }}
     steps:
       - uses: actions/checkout@v7
       # Release tags: the version comes from the tag (main says 0.0.0).
@@ -296,8 +305,9 @@ jobs:
           if-no-files-found: error
 
   # The newest main build as the draft release v0.0.0, replaced on every
-  # push: drafts stay mutable while published releases are immutable, only
-  # collaborators see them, and the update check never offers them.
+  # push and every test build run by hand: drafts stay mutable while
+  # published releases are immutable, only collaborators see them, and the
+  # update check never offers them.
   test-build:
     if: github.ref == 'refs/heads/main'
     needs: [test, package]
@@ -312,6 +322,7 @@ jobs:
       - name: Replace the draft v0.0.0
         env:
           GH_TOKEN: ${{ github.token }}
+          KIND: ${{ inputs.sign == true && 'Signed test build' || 'Test build' }}
         run: |
           draft=$(gh release view v0.0.0 --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
           case "$draft" in
@@ -319,9 +330,9 @@ jobs:
             none) ;;
             *) echo "::error::v0.0.0 is a published release; only a draft is replaced"; exit 1 ;;
           esac
-          printf 'Unsigned test build of %s (%s), not a release.\n' "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > notes.md
+          printf '%s of %s (%s), not a release.\n' "$KIND" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > notes.md
           gh release create v0.0.0 --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Test build ${GITHUB_SHA:0:7}" --notes-file notes.md $(find artifacts -type f)
+            --title "$KIND ${GITHUB_SHA:0:7}" --notes-file notes.md $(find artifacts -type f)
 
   # The one check main requires: everything passed, or was skipped because
   # the pull request only changes documentation.

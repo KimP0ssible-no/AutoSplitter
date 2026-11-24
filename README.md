@@ -131,7 +131,7 @@ The programs are `target/release/autosplitter.exe` and `target/release/profile-e
 
 Windows releases are signed with a [Certum](https://www.certum.eu) Open Source Code Signing certificate issued to the project's maintainer. This covers the programs, the setup and its uninstaller. The key stays in Certum's SimplySign cloud.
 
-Only Windows files that the GitHub Actions release workflow of this repository builds from its source are signed. A person approves every release that signs them.
+Only Windows files that the GitHub Actions CI workflow of this repository builds from its source are signed. This covers releases and test builds that the maintainer starts by hand. A person approves every run that signs files.
 
 | Role | Members |
 | --- | --- |
