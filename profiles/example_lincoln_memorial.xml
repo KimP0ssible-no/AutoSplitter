@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<SplitProfile profileVersion="2">
+	<Game>The Division 2</Game>
+	<Mission>Example Lincoln Memorial</Mission>
+	<Capture targetFps="5" />
+	<Detection cooldownSeconds="5.0">
+		<Pixel enabled="true" fadeThreshold="12" fadeFramesRequired="5" />
+		<OCR enabled="true" region="441,60,996,140" intervalSeconds="1" changeThreshold="0.6" language="en" fuzzyMatchThreshold="0.920000017" ocrRetryFrames="3" />
+	</Detection>
+	<StartTrigger>
+		<From>normal</From>
+		<From>hard</From>
+		<From>challenging</From>
+		<From>heroic</From>
+		<To>Secure the Lincoln Memorial Secure Memorial exterior</To>
+	</StartTrigger>
+	<Segments>
+		<Segment name="After Chunga Kill" pb="60.0">
+			<Keyword>Secure the Lincoln Memorial Secure interior</Keyword>
+		</Segment>
+		<Segment name="Kill Room" pb="122.0">
+			<Keyword>Secure the Lincoln Memorial Reach command room</Keyword>
+		</Segment>
+		<Segment name="Control Room" pb="156.0">
+			<Keyword>Secure the Lincoln Memorial Close the tunnel gates</Keyword>
+		</Segment>
+		<Segment name="Forge" pb="175.0">
+			<Keyword>Secure the Lincoln Memorial Neutralize remaining True Sons</Keyword>
+		</Segment>
+		<Segment name="Elevator" pb="203.0">
+			<Keyword>Secure the Lincoln Memorial Exit via the elevator</Keyword>
+		</Segment>
+		<Segment name="Elevator to end" final="true" pb="214.0">
+			<Keyword>normal</Keyword>
+			<Keyword>hard</Keyword>
+			<Keyword>challenging</Keyword>
+			<Keyword>heroic</Keyword>
+		</Segment>
+	</Segments>
+	<LiveSplit enabled="false" host="localhost" port="16834" />
+	<Overlay enabled="true" x="1" y="295" />
+</SplitProfile>

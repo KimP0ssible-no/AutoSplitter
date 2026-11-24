@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<SplitProfile profileVersion="2">
+	<Game>The Division 2</Game>
+	<Mission>Example Paradise Lost Incursion</Mission>
+	<Capture targetFps="5" />
+	<Detection cooldownSeconds="5.0">
+		<Pixel enabled="true" fadeThreshold="12" fadeFramesRequired="5" />
+		<OCR enabled="true" region="441,60,996,140" intervalSeconds="1" changeThreshold="0.6" language="en" fuzzyMatchThreshold="0.920000017" ocrRetryFrames="3" />
+	</Detection>
+	<StartTrigger>
+		<From>normal</From>
+		<From>hard</From>
+		<From>challenging</From>
+		<From>heroic</From>
+		<To>enter the estate</To>
+	</StartTrigger>
+	<Segments>
+		<Segment name="Courtyard to door" pb="44.8">
+			<Keyword>Enter the Estate find a way into the courtyard</Keyword>
+			<Keyword>find a way into the courtyard</Keyword>
+		</Segment>
+		<Segment name="Transition to Tanker pull" pb="70.0">
+			<Keyword>Enter the Estate Investigate the Oil Tanker</Keyword>
+		</Segment>
+		<Segment name="Tanker pull to Moss Door" pb="154.5">
+			<Keyword>Find and save the survivors</Keyword>
+		</Segment>
+		<Segment name="Moss door to Wright" pb="197.2">
+			<Keyword>Find and save the survivors Search the Bar</Keyword>
+			<Keyword>Search the bar</Keyword>
+		</Segment>
+		<Segment name="Wright to 1st Grate" pb="254.0">
+			<Keyword>Secure the landing area Follow the Tunnel</Keyword>
+			<Keyword>Follow the Tunnel</Keyword>
+		</Segment>
+		<Segment name="Transition to Lovebirds" pb="305.1">
+			<Keyword>Secure the landing area Gather near the Gate</Keyword>
+		</Segment>
+		<Segment name="Lovebirds" final="true" pb="354.0" pte="240">
+			<Keyword>paradise lost</Keyword>
+			<Keyword>PARADISE LOST</Keyword>
+			<Keyword>normal</Keyword>
+			<Keyword>hard</Keyword>
+			<Keyword>challenging</Keyword>
+			<Keyword>heroic</Keyword>
+		</Segment>
+	</Segments>
+	<LiveSplit enabled="false" host="localhost" port="16834" />
+	<Overlay enabled="true" x="1" y="295" />
+</SplitProfile>

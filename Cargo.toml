@@ -1,0 +1,24 @@
+[package]
+name = "autosplitter"
+version = "0.0.0"
+edition = "2024"
+description = "Speedrun auto-splitter that reads on-screen game text"
+authors = ["Kim Attree"]
+license = "Apache-2.0"
+repository = "https://github.com/KimP0ssible-no/AutoSplitter"
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+imageproc = { version = "0.27.0", default-features = false }
+roxmltree = "0.21.2"
+# ONNX Runtime, linked statically from pyke's prebuilt (the download runs at build time only).
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls", "api-24"] }
+
+[profile.release]
+# Smaller shipped binaries: drop symbols and optimise across crates.
+strip = true
+lto = "thin"
+
+[lints.clippy]
+# Every unsafe block says why it is sound (// SAFETY:).
+undocumented_unsafe_blocks = "warn"
