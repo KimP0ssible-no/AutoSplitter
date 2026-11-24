@@ -63,9 +63,11 @@ These keys work while the game has focus:
 | F9 | Start |
 | F10 | Reset |
 | F11 | Stop |
-| Middle mouse button | Split by hand. Click the Split key button in the settings to choose another key or mouse button. |
+| Middle mouse button | Split by hand. Before the start trigger shows, it starts the run. Click the Split key button in the settings to choose another key or mouse button. |
 
-After a split by hand, OCR splits wait for the profile's cooldown (5 seconds by default).
+After the split key, OCR splits wait for the profile's cooldown (5 seconds by default).
+
+To move the overlay, drag it. To resize it, drag the corner mark that shows in its bottom-right corner while the mouse is over the overlay. Click Save Settings to keep the position and size in the profile.
 
 ## Profiles
 
@@ -94,7 +96,7 @@ A profile is an XML file. Edit it with the Profile Editor (the Edit button) or i
     </Segment>
   </Segments>
   <LiveSplit enabled="false" host="localhost" port="16834" />
-  <Overlay enabled="true" x="1" y="295" opacity="80" />
+  <Overlay enabled="true" x="1" y="295" opacity="80" scale="1" />
   <Hotkeys manualSplitKey="Mouse3" />
 </SplitProfile>
 ```

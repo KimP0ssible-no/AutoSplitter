@@ -46,6 +46,8 @@ pub struct Profile {
     pub overlay_x: i32,
     pub overlay_y: i32,
     pub overlay_opacity: u8,
+    /// Overlay size, 1.0 for the standard size.
+    pub overlay_scale: f32,
     /// "Mouse3", "F5" or "VK123", as the legacy app wrote it.
     pub split_key: String,
 }
@@ -79,6 +81,7 @@ impl Default for Profile {
             overlay_x: 100,
             overlay_y: 100,
             overlay_opacity: 80,
+            overlay_scale: 1.0,
             split_key: "Mouse3".into(),
         }
     }
@@ -169,6 +172,7 @@ impl Profile {
             overlay_x: num(overlay, "x", d.overlay_x),
             overlay_y: num(overlay, "y", d.overlay_y),
             overlay_opacity: num(overlay, "opacity", d.overlay_opacity).min(100),
+            overlay_scale: num(overlay, "scale", d.overlay_scale).clamp(0.6, 2.5),
             split_key,
         })
     }
@@ -231,7 +235,7 @@ impl Profile {
         }
         let _ = write!(
             x,
-            "  </Segments>\n  <LiveSplit enabled=\"{}\" host=\"{}\" port=\"{}\" />\n  <Overlay enabled=\"{}\" x=\"{}\" y=\"{}\" opacity=\"{}\" />\n  \
+            "  </Segments>\n  <LiveSplit enabled=\"{}\" host=\"{}\" port=\"{}\" />\n  <Overlay enabled=\"{}\" x=\"{}\" y=\"{}\" opacity=\"{}\" scale=\"{}\" />\n  \
              <Hotkeys manualSplitKey=\"{}\" />\n</SplitProfile>\n",
             self.livesplit_enabled,
             e(&self.livesplit_host),
@@ -240,6 +244,7 @@ impl Profile {
             self.overlay_x,
             self.overlay_y,
             self.overlay_opacity,
+            self.overlay_scale,
             e(&self.split_key),
         );
         x

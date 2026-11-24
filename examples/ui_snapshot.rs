@@ -1,5 +1,5 @@
 //! Render a window off-screen to a PNG, to check the look without opening a window:
-//! `cargo run --example ui_snapshot -- out.png main|overlay|editor`.
+//! `cargo run --example ui_snapshot -- out.png main|overlay|editor [overlay scale]`.
 
 use autosplitter::profile::Profile;
 use autosplitter::run::fmt_time;
@@ -24,8 +24,9 @@ fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (out, scene) = (args[0].clone(), args.get(1).cloned().unwrap_or("main".into()));
+    let scale: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1.0);
     let (width, height) = match scene.as_str() {
-        "overlay" => (620, 390),
+        "overlay" => ((620.0 * scale) as u32, (390.0 * scale) as u32),
         "editor" => (940, 900),
         _ => (860, 900),
     };
@@ -56,6 +57,7 @@ fn main() {
     let _component: Box<dyn std::any::Any> = match scene.as_str() {
         "overlay" => {
             let o = Overlay::new().unwrap();
+            o.set_scale(scale);
             o.set_heading(p.display_name().into());
             o.set_rows(model(rows));
             o.set_active_row(3);

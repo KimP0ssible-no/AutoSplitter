@@ -137,19 +137,21 @@ fn run_profile(p: &Profile, debug: bool, rx: &Receiver<Cmd>, tx: &Sender<Ev>, oc
                 Cmd::Start(..) | Cmd::Language(_) => {}
             }
         }
-        match capture.grab(0) {
-            Ok(Some(f)) => {
+        let crop = match capture.grab(0) {
+            Ok(frame) => {
                 capture_error = false;
-                let crop = run::crop_bright(&f.bgra, f.width, f.height, f.stride, [0, 0, f.width as i32, f.height as i32]);
-                events.extend(det.frame(crop, now(), &mut |img| ocr.read(img).map_err(|e| log(format!("[ERROR] OCR: {e}"))).ok()));
+                frame.and_then(|f| run::crop_bright(&f.bgra, f.width, f.height, f.stride, [0, 0, f.width as i32, f.height as i32]))
             }
-            Ok(None) => {}
-            Err(e) if !capture_error => {
+            Err(e) => {
+                if !capture_error {
+                    log(format!("[ERROR] Screen capture: {e}"));
+                }
                 capture_error = true;
-                log(format!("[ERROR] Screen capture: {e}"));
+                None
             }
-            Err(_) => {}
-        }
+        };
+        // A still screen sends no new frames: OCR reads the last ones again at its interval.
+        events.extend(det.frame(crop, now(), &mut |img| ocr.read(img).map_err(|e| log(format!("[ERROR] OCR: {e}"))).ok()));
         for e in events {
             forward(e, &det, tx, ls);
         }
@@ -274,6 +276,7 @@ fn show_profile(app: &App) {
     ui.set_region(format!("{},{},{},{}", p.region[0], p.region[1], p.region[2], p.region[3]).into());
     show_segments(app);
     app.overlay.set_bg_opacity(f32::from(p.overlay_opacity));
+    app.overlay.set_scale(p.overlay_scale);
     app.overlay.window().set_position(PhysicalPosition::new(p.overlay_x, p.overlay_y));
     show_overlay(app);
 }
@@ -296,6 +299,7 @@ fn read_settings(app: &mut App) {
     p.livesplit_port = ui.get_livesplit_port().trim().parse().unwrap_or(p.livesplit_port);
     p.overlay_enabled = ui.get_overlay();
     p.overlay_opacity = ui.get_overlay_opacity().round() as u8;
+    p.overlay_scale = (app.overlay.get_scale() * 100.0).round() / 100.0;
     if app.overlay.window().is_visible() {
         let pos = app.overlay.window().position();
         (p.overlay_x, p.overlay_y) = (pos.x, pos.y);
