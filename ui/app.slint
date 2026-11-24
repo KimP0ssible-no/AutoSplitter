@@ -68,7 +68,8 @@ component Label inherits Text {
 }
 
 component Cell inherits Label {
-    width: 76px;
+    // Wide enough for "10:00.000" at this font size.
+    width: max(76px, self.font-size * 4.5);
     horizontal-alignment: right;
     font-family: Theme.mono;
 }
@@ -109,7 +110,7 @@ component Splits inherits VerticalLayout {
         padding-left: 10px;
         padding-right: 6px;
         Label { text: "SEGMENT"; horizontal-stretch: 1; color: Theme.dim; font-size: root.size * 0.78; font-weight: 700; outline: root.outline; }
-        for h in ["SPLIT", "TOTAL", "PB", "+/-"]: Cell { text: h; color: Theme.dim; font-size: root.size * 0.78; font-weight: 700; font-family: ""; outline: root.outline; }
+        for h in ["SPLIT", "TOTAL", "PB", "+/-"]: Cell { text: h; width: max(76px, root.size * 4.5); color: Theme.dim; font-size: root.size * 0.78; font-weight: 700; font-family: ""; outline: root.outline; }
     }
     for r[i] in root.rows: Rectangle {
         height: root.row-height;
@@ -345,40 +346,64 @@ export component Overlay inherits Window {
     in property <int> timer-state;
     in property <string> pb-total;
     in property <float> bg-opacity: 80;
+    // Size, set with the grip in the bottom-right corner; 1 is the standard size.
+    in-out property <float> scale: 1;
     callback drag();
-    width: 620px;
+    width: 620px * root.scale;
+    height: content.preferred-height;
 
     // The plate fades with the opacity setting; the outlined text above it does not.
     Rectangle {
         opacity: root.bg-opacity / 100;
         background: Theme.panel;
-        border-radius: 10px;
+        border-radius: 10px * root.scale;
         border-width: 1px;
         border-color: Theme.edge-dark;
         Rectangle { x: 10px; y: 1px; width: parent.width - 20px; height: 1px; background: Theme.edge-light; }
     }
-    TouchArea {
+    move := TouchArea {
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
                 root.drag();
             }
         }
     }
-    VerticalLayout {
-        padding: 12px;
-        spacing: 4px;
-        Label { text: root.heading; color: Theme.text; font-size: 16px; font-weight: 700; overflow: elide; outline: true; }
-        Splits { rows: root.rows; active: root.active-row; size: 17px; row-height: 27px; outline: true; }
+    content := VerticalLayout {
+        padding: 12px * root.scale;
+        spacing: 4px * root.scale;
+        Label { text: root.heading; color: Theme.text; font-size: 16px * root.scale; font-weight: 700; overflow: elide; outline: true; }
+        Splits { rows: root.rows; active: root.active-row; size: 17px * root.scale; row-height: 27px * root.scale; outline: true; }
         Label {
             text: root.timer;
-            font-size: 50px;
+            font-size: 50px * root.scale;
             font-family: Theme.mono;
             font-weight: 700;
             horizontal-alignment: right;
             color: root.timer-state == 1 ? Theme.gold : Theme.green;
             outline: true;
         }
-        Label { text: "Personal best  " + root.pb-total; color: Theme.text; font-size: 15px; horizontal-alignment: right; outline: true; }
+        Label { text: "Personal best  " + root.pb-total; color: Theme.text; font-size: 15px * root.scale; horizontal-alignment: right; outline: true; }
+    }
+    // Shown while the mouse is over the overlay, out of the way during a run.
+    grip := TouchArea {
+        x: parent.width - self.width;
+        y: parent.height - self.height;
+        width: 22px;
+        height: 22px;
+        mouse-cursor: nwse-resize;
+        moved => {
+            if (self.pressed) {
+                root.scale = clamp(root.scale + (self.mouse-x - self.pressed-x) / 620px, 0.6, 2.5);
+            }
+        }
+        Text {
+            text: "\u{25E2}";
+            color: Theme.accent;
+            font-size: 16px;
+            visible: move.has-hover || grip.has-hover;
+            horizontal-alignment: right;
+            vertical-alignment: bottom;
+        }
     }
 }
 

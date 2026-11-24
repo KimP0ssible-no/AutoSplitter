@@ -118,7 +118,8 @@ impl Detector {
             self.previous_text = newest.clone();
         }
         if self.debug && !newest.is_empty() {
-            events.push(Event::Log(format!("[DEBUG] OCR ({newest_ms} ms): \"{}\"", one_line(&newest))));
+            let (w, h) = self.frames.back().map_or((0, 0), |(i, _)| i.dimensions());
+            events.push(Event::Log(format!("[DEBUG] OCR ({newest_ms} ms, {w}x{h}): \"{}\"", one_line(&newest))));
         }
         events.push(Event::Ocr { text: newest, ms: newest_ms });
         events
@@ -173,9 +174,16 @@ impl Detector {
         }
     }
 
-    /// Moves to the next segment. A manual split blocks OCR splits for the cooldown.
+    /// Moves to the next segment. Before the start trigger it starts the run instead, as
+    /// LiveSplit's start/split key does. Either blocks OCR splits for the cooldown.
     pub fn manual_split(&mut self, ts: f64) -> Vec<Event> {
         let mut events = Vec::new();
+        if self.state == State::Waiting {
+            self.state = State::Running;
+            (self.start, self.last_split, self.last_manual) = (ts, ts, Some(ts));
+            events.push(Event::Started { text: "split key".into() });
+            return events;
+        }
         let next = self.current.map_or(0, |c| c + 1);
         if self.state != State::Running || next >= self.p.segments.len() || self.last_manual.is_some_and(|m| ts - m < f64::from(self.p.cooldown_seconds)) {
             return events;
@@ -291,6 +299,11 @@ mod tests {
         // Inside the 1 s OCR interval nothing is read.
         assert!(feed(&mut d, "courtyard", 0.5).is_empty());
         assert!(matches!(d.manual_split(2.0)[0], Event::Split { index: 0, manual: true, .. }));
+        // Before the start trigger, the split key starts the run.
+        let mut w = Detector::new(&profile());
+        assert_eq!(w.manual_split(1.0), vec![Event::Started { text: "split key".into() }]);
+        assert_eq!((w.state(), w.elapsed(3.0)), (State::Running, 2.0));
+        assert!(w.manual_split(2.0).is_empty(), "cooldown");
         assert!(d.manual_split(3.0).is_empty(), "cooldown");
         assert!(feed(&mut d, "tanker", 4.0).is_empty(), "cooldown blocks OCR splits too");
         assert!(matches!(feed(&mut d, "tanker", 7.5)[0], Event::Split { index: 1, .. }));
