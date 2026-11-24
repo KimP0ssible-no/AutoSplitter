@@ -11,8 +11,43 @@ repository = "https://github.com/KimP0ssible-no/AutoSplitter"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 imageproc = { version = "0.27.0", default-features = false }
 roxmltree = "0.21.2"
+# Already built for Slint; local time for log lines.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # ONNX Runtime, linked statically from pyke's prebuilt (the download runs at build time only).
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls", "api-24"] }
+
+# Updates: GitHub Releases over HTTPS, minisign-signed checksums, the portable zip.
+serde_json = "1.0"
+sha2 = "0.11"
+minisign-verify = "0.3.0"
+zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+slint = { version = "1.19.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility", "unstable-winit-030"] }
+
+[build-dependencies]
+embed-resource = "3.0.12"
+slint-build = "1.19.1"
+
+[target."cfg(not(windows))".dependencies]
+ureq = "3.5.2"
+rfd = "0.18.0"
+
+[target."cfg(windows)".dependencies]
+# Native file and message dialogs.
+rfd = { version = "0.18.0", default-features = false, features = ["common-controls-v6"] }
+# Windows' own TLS (SChannel) and certificate store: no C crypto library to build.
+ureq = { version = "3.5.2", default-features = false, features = ["native-tls-no-default", "gzip"] }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.release]
 # Smaller shipped binaries: drop symbols and optimise across crates.
