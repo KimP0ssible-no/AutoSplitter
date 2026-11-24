@@ -111,6 +111,10 @@ fn run_profile(p: &Profile, debug: bool, rx: &Receiver<Cmd>, tx: &Sender<Ev>, oc
     let mut det = Detector::new(p);
     det.debug = debug;
     log(format!("[INFO] Started: {} ({} segments)", p.display_name(), p.segments.len()));
+    let shot = std::env::temp_dir().join("autosplitter-ocr.png");
+    if debug {
+        log(format!("[DEBUG] Each OCR pass saves the image it reads to {}", shot.display()));
+    }
     let frame_time = Duration::from_secs_f64(1.0 / f64::from(p.target_fps.max(1)));
     let mut capture_error = false;
     loop {
@@ -151,7 +155,14 @@ fn run_profile(p: &Profile, debug: bool, rx: &Receiver<Cmd>, tx: &Sender<Ev>, oc
             }
         };
         // A still screen sends no new frames: OCR reads the last ones again at its interval.
-        events.extend(det.frame(crop, now(), &mut |img| ocr.read(img).map_err(|e| log(format!("[ERROR] OCR: {e}"))).ok()));
+        let (debug, mut saved) = (det.debug, false);
+        events.extend(det.frame(crop, now(), &mut |img| {
+            // The newest image of the pass: what OCR saw.
+            if debug && !saved {
+                saved = img.save(&shot).is_ok();
+            }
+            ocr.read(img).map_err(|e| log(format!("[ERROR] OCR: {e}"))).ok()
+        }));
         for e in events {
             forward(e, &det, tx, ls);
         }
@@ -377,6 +388,8 @@ fn start(app: &Shared) {
     let debug = a.ui.upgrade().is_some_and(|ui| {
         ui.set_running(true);
         ui.set_run_state(1);
+        ui.set_ocr_text("".into());
+        ui.set_ocr_ms("".into());
         ui.get_debug()
     });
     let _ = a.cmd.send(Cmd::Start(Box::new(a.profile.clone()), debug));

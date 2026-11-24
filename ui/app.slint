@@ -418,6 +418,9 @@ export component RegionPicker inherits Window {
     in-out property <length> y0;
     in-out property <length> x1;
     in-out property <length> y1;
+    // The size the picture is shown at, to turn a drag into a part of it.
+    out property <length> view-width: touch.width;
+    out property <length> view-height: touch.height;
     callback done();
     callback cancel();
     callback next-monitor();
