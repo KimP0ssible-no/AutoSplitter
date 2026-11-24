@@ -1,5 +1,6 @@
-//! Global keys and mouse buttons, seen while a game has focus. Low-level hooks see a key
-//! whatever modifiers are held, and pass it on to the game.
+//! Global keys and mouse buttons, seen while a game has focus. F9, F10 and F11 are
+//! registered hot keys; the split key and key binding use low-level hooks, which see a
+//! key whatever modifiers are held, and pass it on to the game.
 
 /// A key press (Windows virtual-key code) or mouse button 3 to 5.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +41,11 @@ mod hooks {
     use std::sync::{Mutex, OnceLock};
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey};
     use windows::Win32::UI::WindowsAndMessaging::*;
+
+    // Hot key ids 1 to 3 are F9 to F11.
+    const HOT_KEYS: [(i32, u32); 3] = [(1, 0x78), (2, 0x79), (3, 0x7A)];
 
     type Handler = Box<dyn Fn(Input) + Send + Sync>;
     static HANDLER: OnceLock<Handler> = OnceLock::new();
@@ -51,6 +56,11 @@ mod hooks {
         if code == HC_ACTION as i32 {
             // SAFETY: for WH_KEYBOARD_LL with HC_ACTION, lParam points to a KBDLLHOOKSTRUCT.
             let vk = unsafe { (*(l.0 as *const KBDLLHOOKSTRUCT)).vkCode };
+            // F9 to F11 arrive as hot keys.
+            if HOT_KEYS.iter().any(|&(_, k)| k == vk) {
+                // SAFETY: passes the event on unchanged, as every hook must.
+                return unsafe { CallNextHookEx(None, code, w, l) };
+            }
             let mut down = DOWN.lock().unwrap_or_else(|e| e.into_inner());
             match w.0 as u32 {
                 WM_KEYDOWN | WM_SYSKEYDOWN if !down.contains(&vk) => {
@@ -87,21 +97,39 @@ mod hooks {
         unsafe { CallNextHookEx(None, code, w, l) }
     }
 
-    pub fn start(handler: impl Fn(Input) + Send + Sync + 'static) {
-        if HANDLER.set(Box::new(handler)).is_err() {
-            return;
-        }
-        std::thread::spawn(|| {
+    /// Starts listening; the error names each part that could not be set up.
+    pub fn start(handler: impl Fn(Input) + Send + Sync + 'static) -> Result<(), String> {
+        HANDLER.set(Box::new(handler)).map_err(|_| "global input already started".to_string())?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
             // SAFETY: the hook procedures live for the whole program, and this thread
-            // runs the message loop the hooks are called from.
+            // runs the message loop the hooks and hot keys are delivered through.
             unsafe {
-                let module = GetModuleHandleW(None).ok();
-                let _k = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), module.map(Into::into), 0);
-                let _m = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse), module.map(Into::into), 0);
+                let module = GetModuleHandleW(None).ok().map(Into::into);
+                let mut problems = Vec::new();
+                if let Err(e) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), module, 0) {
+                    problems.push(format!("keyboard hook: {}", e.message()));
+                }
+                if let Err(e) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse), module, 0) {
+                    problems.push(format!("mouse hook: {}", e.message()));
+                }
+                for (id, vk) in HOT_KEYS {
+                    if let Err(e) = RegisterHotKey(None, id, MOD_NOREPEAT, vk) {
+                        problems.push(format!("F{}: {}", vk - 0x6F, e.message()));
+                    }
+                }
+                let _ = tx.send(if problems.is_empty() { Ok(()) } else { Err(problems.join("; ")) });
                 let mut msg = MSG::default();
-                while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    if msg.message == WM_HOTKEY
+                        && let (Some(&(_, vk)), Some(h)) = (HOT_KEYS.iter().find(|(id, _)| *id as usize == msg.wParam.0), HANDLER.get())
+                    {
+                        h(Input::Key(vk));
+                    }
+                }
             }
         });
+        rx.recv().unwrap_or_else(|_| Err("the input thread stopped".into()))
     }
 }
 
@@ -110,7 +138,9 @@ pub use hooks::start;
 
 /// Global input needs Windows; elsewhere nothing is delivered.
 #[cfg(not(windows))]
-pub fn start(_handler: impl Fn(Input) + Send + Sync + 'static) {}
+pub fn start(_handler: impl Fn(Input) + Send + Sync + 'static) -> Result<(), String> {
+    Err("global keys need Windows".into())
+}
 
 #[cfg(test)]
 mod tests {

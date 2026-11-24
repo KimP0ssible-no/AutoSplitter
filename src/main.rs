@@ -511,6 +511,9 @@ fn offer_update(app: &Shared, tag: &str, notes: &str) {
 }
 
 fn input(app: &Shared, key: Input, ts: f64) {
+    if app.borrow().ui.upgrade().is_some_and(|ui| ui.get_debug()) {
+        log(app, &format!("[DEBUG] Input: {}", input::key_name(key)));
+    }
     if app.borrow().binding {
         {
             let mut a = app.borrow_mut();
@@ -603,7 +606,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (key_tx, key_rx) = mpsc::channel::<(Input, f64)>();
     let key_tx = Mutex::new(key_tx);
     // The time is taken in the hook, so a manual split is not late by the 50 ms poll below.
-    input::start(move |k| drop(key_tx.lock().map(|t| t.send((k, now())))));
+    match input::start(move |k| drop(key_tx.lock().map(|t| t.send((k, now()))))) {
+        Ok(()) => log(&app, "[INFO] Global keys ready: F9 start, F10 reset, F11 stop"),
+        Err(e) => log(&app, &format!("[ERROR] Global keys: {e}")),
+    }
 
     {
         let check_tx = ev_tx.clone();
