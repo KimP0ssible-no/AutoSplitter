@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in AutoSplitter does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting it. The details below help us reproduce the problem.
+  - type: input
+    id: version
+    attributes:
+      label: AutoSplitter version
+      description: The title bar shows it.
+      placeholder: "2.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How AutoSplitter was installed
+      options:
+        - Setup (.exe)
+        - Portable zip
+        - Updated from 1.x
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game and profile
+      description: For example The Division 2 with example_paradise_lost.xml. Attach the profile if you changed it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include any error message as AutoSplitter shows it, and the log lines around it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: For OCR problems, a screenshot of the OCR region helps most. Remove anything you would rather not share.

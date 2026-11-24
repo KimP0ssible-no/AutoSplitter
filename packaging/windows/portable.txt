@@ -1,0 +1,8 @@
+AutoSplitter portable
+
+While this file sits next to AutoSplitter.exe, AutoSplitter keeps its
+profiles (and the personal bests in them) in the "profiles" folder beside
+it, and nothing in your Windows profile: the whole folder can go anywhere.
+
+Updates unpack over these files and never replace the profiles folder.
+Delete this file to use %APPDATA%\AutoSplitter\profiles instead.

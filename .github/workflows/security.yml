@@ -1,0 +1,21 @@
+name: Security
+
+# Each night: advisories. The code does not change overnight but the advisory
+# database does, so a failure can mean a shipped release depends on a
+# vulnerable crate. By hand: workflow_dispatch.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        with:
+          command-arguments: advisories

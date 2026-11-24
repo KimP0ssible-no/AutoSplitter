@@ -1,2 +1,4 @@
 # Signed test fixtures: their bytes must not change (no CRLF on Windows checkouts).
 testdata/** -text
+# Licence texts kept byte for byte as their authors ship them.
+packaging/notices/** -text

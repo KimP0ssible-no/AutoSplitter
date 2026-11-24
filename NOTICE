@@ -1,0 +1,27 @@
+AutoSplitter
+Copyright 2026 Kim Attree
+
+This product includes software developed by Kim Attree as AutoSplitter.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+AutoSplitter's user interface is built with Slint (https://slint.dev), used
+under the GNU General Public License, version 3 (see SLINT-LICENSE.md). The
+AutoSplitter and ProfileEditor programs are therefore distributed as a whole
+under GPL-3.0-only; their source code stays available under Apache-2.0, which
+is compatible with GPL-3.0.
+
+AutoSplitter includes ONNX Runtime, Copyright (c) Microsoft Corporation, under
+the MIT License (see onnxruntime-LICENSE.txt), with the third-party components
+listed in onnxruntime-ThirdPartyNotices.txt.
+
+AutoSplitter includes the PP-OCR text detection and recognition models and
+their character dictionaries from PaddleOCR (Copyright (c) PaddlePaddle
+Authors), as converted to ONNX by the RapidOCR project (RapidAI), both under
+the Apache License, Version 2.0.
+
+The Windows packages include the Microsoft Visual C++ runtime files
+(msvcp140*.dll, vcruntime140*.dll and others), redistributed under the
+Microsoft Visual Studio redistribution terms.
+
+The licences of the Rust crates AutoSplitter is built from are listed in
+THIRD-PARTY-NOTICES.html.

@@ -1,0 +1,20 @@
+name: Feature request
+description: Something AutoSplitter should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What it is for
+      description: The game and the run you would use it for help us get it right.
+  - type: input
+    id: version
+    attributes:
+      label: AutoSplitter version
+      description: The title bar shows it.

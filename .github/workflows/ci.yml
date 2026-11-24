@@ -1,0 +1,377 @@
+name: CI
+
+on:
+  push:
+    # Main builds the cache that pull requests and tags start from.
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Read-only unless a job says otherwise (release).
+permissions:
+  contents: read
+
+# A newer merge makes an older main run moot; other runs never cancel.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'ci-main' || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Pull requests that only touch Markdown or docs/ skip the builds; tags
+  # always build everything.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # The file list, not the diff: GitHub refuses diffs over 20000 lines.
+            # Anything going wrong here means "build everything".
+            files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' || true)
+            printf '%s\n' "$files"
+            if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '(\.md$|^docs/)'; then
+              code=false
+            fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+      # A release tag carries the version (packaging/set-version.sh writes it
+      # into the build) and, as its message, the release notes. Checked here,
+      # before the builds.
+      - name: Release tag is newer than the latest release and has notes
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "$v" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'
+          latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || echo v0.0.0)
+          latest="${latest#v}"
+          echo "latest release $latest, this tag $v"
+          [ "$v" != "$latest" ] && [ "$(printf '%s\n' "$latest" "$v" | sort -V | tail -1)" = "$v" ]
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")
+          [ "$(echo "$ref" | jq -r .object.type)" = tag ] || { echo "::error::$GITHUB_REF_NAME is not an annotated tag: its message is the release notes"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$(echo "$ref" | jq -r .object.sha)" --jq .message | tee notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "::error::$GITHUB_REF_NAME has no release notes in its message"; exit 1; }
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      # Dependencies as built by the last run on main; pull requests and tags only read it.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Linux fontconfig headers for Slint, minisign for the signing script
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev minisign
+      # The OCR accuracy tests need the models (about 31 MB, hashes in the script).
+      - uses: actions/cache@v6
+        with:
+          path: models
+          key: models-${{ hashFiles('packaging/fetch-models.sh') }}
+      - run: sh packaging/fetch-models.sh
+        shell: bash
+      # What a release tag runs first: the version in every file, and the
+      # lock file still matching (main is put back afterwards).
+      - name: Release version script
+        shell: bash
+        run: |
+          sh packaging/set-version.sh 9.8.7
+          cargo metadata --locked --format-version 1 > /dev/null
+          test "$(git diff --numstat | wc -l)" -eq 3
+          git checkout -- .
+      # The release job's signing script, with a throwaway key: it must sign,
+      # and refuse a signature the given public key does not match.
+      - name: Release signing script
+        if: runner.os == 'Linux'
+        run: |
+          t=$(mktemp -d)
+          echo test > "$t/SHA256SUMS"
+          minisign -G -W -p "$t/k.pub" -s "$t/k.key"
+          minisign -G -W -p "$t/other.pub" -s "$t/other.key"
+          MINISIGN_KEY="$(cat "$t/k.key")" packaging/sign-release.sh "$t" "$t/k.pub"
+          if MINISIGN_KEY="$(cat "$t/k.key")" packaging/sign-release.sh "$t" "$t/other.pub"; then
+            echo "::error::signed with a key the public key does not match"; exit 1
+          fi
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      # Release mode: the OCR tests time each image.
+      - run: cargo test --locked --release -- --nocapture
+
+  # Licences, bans and sources fail any run; a new advisory only reports on a
+  # pull request or main (it is rarely the change's doing) but fails a release
+  # tag. security.yml checks every night.
+  deny:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        with:
+          command-arguments: bans licenses sources
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        continue-on-error: ${{ github.ref_type != 'tag' }}
+        with:
+          command-arguments: advisories
+
+  # The setup program and the portable zip. On a release tag the programs, the
+  # setup and its uninstaller are signed; the job then waits for approval of
+  # the "release" environment, which holds the Certum login.
+  package:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
+    env:
+      SIGN: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v7
+      # Release tags: the version comes from the tag (main says 0.0.0).
+      - name: Version from the tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: sh packaging/set-version.sh "${GITHUB_REF_NAME#v}"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/cache@v6
+        with:
+          path: models
+          key: models-${{ hashFiles('packaging/fetch-models.sh') }}
+      - run: sh packaging/fetch-models.sh
+        shell: bash
+      - run: cargo build --locked --release
+      - name: Third-party licence notices
+        shell: bash
+        run: |
+          cargo install cargo-about --locked --features cli
+          cargo about generate about.hbs -o target/THIRD-PARTY-NOTICES.html
+      # Windows shows these in each file's properties.
+      - name: The programs name AutoSplitter and its version
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          foreach ($b in 'autosplitter', 'profile-editor') {
+            $info = (Get-Item "target\release\$b.exe").VersionInfo
+            "$b.exe: $($info.ProductName) $($info.ProductVersion)"
+            if ($info.ProductName -ne 'AutoSplitter' -or $info.ProductVersion -ne $v) { throw "$b.exe has the wrong version information" }
+          }
+      # SimplySign Desktop logged in with the TOTP seed; the certificate's key
+      # never leaves Certum's cloud.
+      - name: Certum SimplySign login
+        if: env.SIGN == 'true'
+        uses: jay0lee/certum-cloud-code-sign@a3324503499c49090869856eeeecfe95fb613d87 # v1
+        with:
+          username: ${{ secrets.CERTUM_USERNAME }}
+          totp_secret: ${{ secrets.CERTUM_TOTP_SECRET }}
+      - name: Sign the programs
+        if: env.SIGN == 'true'
+        run: |
+          signtool sign /sha1 $env:CERTUM_CERT_THUMBPRINT /fd SHA256 /tr http://time.certum.pl /td SHA256 target\release\autosplitter.exe target\release\profile-editor.exe
+          if ($LASTEXITCODE) { throw 'signtool failed' }
+      # What both packages install: the programs under their product names,
+      # the models and the licence notices.
+      - name: Stage the files
+        run: |
+          $stage = 'target\stage'
+          New-Item -ItemType Directory -Force "$stage\models" | Out-Null
+          Copy-Item target\release\autosplitter.exe "$stage\AutoSplitter.exe"
+          Copy-Item target\release\profile-editor.exe "$stage\ProfileEditor.exe"
+          Copy-Item models\* "$stage\models"
+          Copy-Item LICENSE "$stage\LICENSE.txt"
+          Copy-Item NOTICE "$stage\NOTICE.txt"
+          Copy-Item SLINT-LICENSE.md, target\THIRD-PARTY-NOTICES.html, packaging\notices\* $stage
+          # The prebuilt ONNX Runtime uses the DLL C++ runtime: its redistributable
+          # files go beside the programs, so no Visual C++ install is needed.
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory | Sort-Object FullName | Select-Object -Last 1
+          Copy-Item "$crt\*.dll" $stage
+      # ONNX Runtime is linked in and DirectML.dll is delay-loaded and never used
+      # (build.rs); any C++ runtime DLL the programs import must be in the package.
+      - name: The programs need only Windows' DLLs and the ones beside them
+        shell: bash
+        run: |
+          command -v objdump || { echo "::warning::no objdump on this runner; DLL check skipped"; exit 0; }
+          for b in AutoSplitter ProfileEditor; do
+            deps=$(objdump -p target/stage/$b.exe | awk '/DLL Name/{print $3}' | tr 'A-Z' 'a-z' | sort -u)
+            echo "$b.exe:" $deps
+            ! echo "$deps" | grep -q onnxruntime
+            for d in $(echo "$deps" | grep -E '^(vcruntime|msvcp|concrt)'); do
+              ls target/stage | tr 'A-Z' 'a-z' | grep -qxF "$d" || { echo "::error::$b.exe needs $d, which is not in the package"; exit 1; }
+            done
+          done
+      # Inno Setup signs the setup and the uninstaller it carries.
+      - name: Installer
+        run: |
+          choco install innosetup -y --no-progress
+          $stage = "/DStage=$PWD\target\stage"
+          if ($env:SIGN -eq 'true') {
+            iscc $stage /DSign ('/Scertum=signtool sign /sha1 ' + $env:CERTUM_CERT_THUMBPRINT + ' /fd SHA256 /tr http://time.certum.pl /td SHA256 $f') packaging\windows\autosplitter.iss
+          } else {
+            iscc $stage packaging\windows\autosplitter.iss
+          }
+          if ($LASTEXITCODE) { throw 'iscc failed' }
+      # The files at the zip's root, as 1.x's updater and the in-app update
+      # unpack it over the program folder; portable.txt keeps profiles beside it.
+      - name: Portable zip
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          Copy-Item packaging\windows\portable.txt target\stage
+          $zip = "target\autosplitter-$v-x64-portable.zip"
+          Compress-Archive -Path target\stage\* -DestinationPath $zip -Force
+          Remove-Item target\stage\portable.txt
+          Expand-Archive $zip target\check
+          foreach ($f in 'AutoSplitter.exe', 'ProfileEditor.exe', 'portable.txt', 'LICENSE.txt', 'models\en_PP-OCRv3_det_mobile.onnx', 'models\ppocrv5_dict.txt') {
+            if (-not (Test-Path "target\check\$f")) { throw "the portable zip lacks $f" }
+          }
+      - name: Check every signature
+        if: env.SIGN == 'true'
+        run: |
+          signtool verify /pa target\stage\AutoSplitter.exe target\stage\ProfileEditor.exe (Get-Item packaging\windows\Output\*.exe).FullName
+          if ($LASTEXITCODE) { throw 'a Windows file is not signed' }
+      # Logged out before anything built here runs.
+      - name: Certum SimplySign logout
+        if: always() && env.SIGN == 'true'
+        uses: jay0lee/certum-cloud-code-sign/teardown@a3324503499c49090869856eeeecfe95fb613d87 # v1
+      # What the in-app update does: the latest release installed per user,
+      # then the new setup run with the in-app switches. It must replace the
+      # program in the same place, stay closed without /RELAUNCH=1 and start
+      # with it. Skipped until a release with a setup exists.
+      - name: Setup upgrades the latest release in place
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Wait for setup itself only: Start-Process -Wait would also wait for
+          # the AutoSplitter that /RELAUNCH=1 starts.
+          function Setup($exe, [string[]] $switches) {
+            Write-Host "$exe $switches"
+            $p = Start-Process $exe -ArgumentList $switches -PassThru
+            $p.WaitForExit()
+            if ($p.ExitCode -ne 0) { throw "$exe exited with $($p.ExitCode)" }
+          }
+          gh release download --repo $env:GITHUB_REPOSITORY --pattern '*-x64-setup.exe' --dir previous 2>$null
+          if (-not (Test-Path previous\*.exe)) { Write-Host 'no earlier release with a setup'; exit 0 }
+          $old = (Get-ChildItem previous\*.exe)[0].FullName
+          $new = (Get-ChildItem packaging\windows\Output\*.exe)[0].FullName
+          $quiet = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          Setup $old ($quiet + '/CURRENTUSER')
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E64EEC19-3D84-49A6-9458-91BCE0843A91}_is1'
+          $dir = (Get-ItemProperty $key).InstallLocation
+          Setup $new ($quiet + '/CLOSEAPPLICATIONS')
+          if ((Get-FileHash "$dir\AutoSplitter.exe").Hash -ne (Get-FileHash target\stage\AutoSplitter.exe).Hash) { throw "setup did not replace $dir\AutoSplitter.exe" }
+          if (Get-Process AutoSplitter -ErrorAction SilentlyContinue) { throw 'AutoSplitter started without /RELAUNCH=1' }
+          Setup $new ($quiet + '/CLOSEAPPLICATIONS', '/RELAUNCH=1')
+          Start-Sleep -Seconds 5
+          $running = Get-Process AutoSplitter -ErrorAction SilentlyContinue
+          if (-not $running) { throw 'AutoSplitter did not start again after /RELAUNCH=1' }
+          $running | Stop-Process
+      - uses: actions/upload-artifact@v7
+        with:
+          name: autosplitter-windows
+          path: |
+            packaging/windows/Output/*.exe
+            target/*.zip
+          if-no-files-found: error
+
+  # The one check main requires: everything passed, or was skipped because
+  # the pull request only changes documentation.
+  ci-ok:
+    if: always()
+    needs: [changes, test, deny, package]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) exit 1 ;; esac
+          done
+          [ "${{ needs.changes.result }}" = success ]
+
+  # A pushed tag vX.Y.Z publishes the packages as a GitHub Release. The
+  # minisign key is a secret of the "release" environment, which waits for
+  # approval before this job runs.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, deny, package]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: autosplitter-*
+          path: artifacts
+      # SHA256SUMS.minisig is what the in-app update checks before it installs
+      # anything (key: packaging/minisign.pub).
+      - name: Checksums, signed
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          mkdir release
+          find artifacts -type f -exec mv -t release {} +
+          (cd release && sha256sum * > SHA256SUMS)
+          packaging/sign-release.sh release
+      # Build provenance for every file: gh attestation verify <file> --repo <this repo>.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release/*
+      # The notes say what changed in plain words: the annotated tag's
+      # message, its wrapped lines joined.
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq .object.sha)
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag" --jq .message | perl -0pe 's/\s+\z/\n/; s/(?<!\n)\n(?![\n*-]|\z)/ /g' > changes.md
+          {
+            echo "Windows files are signed as the [Code signing policy](https://github.com/$GITHUB_REPOSITORY#code-signing-policy) describes."
+            echo
+            echo "## What's changed"
+            echo
+            cat changes.md
+          } > notes.md
+          cat notes.md
+      # For autosplitter.attr.ee: AutoSplitter 1.x reads version.json there
+      # and installs the zip it names, so 1.x users move to this release.
+      - name: version.json for 1.x installs
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          jq -n --arg version "$GITHUB_REF_NAME" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/autosplitter-$v-x64-portable.zip" \
+            --rawfile changelog changes.md '{version: $version, url: $url, changelog: ($changelog | rtrimstr("\n"))}' > version.json
+          cat version.json
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AutoSplitter ${GITHUB_REF_NAME#v}" --notes-file notes.md release/* version.json
