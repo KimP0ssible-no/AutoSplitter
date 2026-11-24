@@ -44,7 +44,7 @@ impl Ocr {
         Ok(Ocr { det: session(det)?, rec: session(rec)?, keys, language })
     }
 
-    /// Reads all text in the image, one detected line per output line, top to bottom.
+    /// Reads all text in the image as one line: detected lines top to bottom, joined by spaces.
     pub fn read(&mut self, image: &RgbImage) -> Result<String, String> {
         let (w, h) = image.dimensions();
         if w == 0 || h == 0 {
@@ -61,14 +61,15 @@ impl Ocr {
         };
         let mut padded = RgbImage::from_pixel(image.width() + 2 * PADDING, image.height() + 2 * PADDING, Rgb([255, 255, 255]));
         image::imageops::replace(&mut padded, image, PADDING.into(), PADDING.into());
-        let mut text = String::new();
+        let mut lines = Vec::new();
         for quad in self.detect(&padded)? {
             let line = self.recognize(&crop(&padded, &quad))?;
             if !line.is_empty() {
-                text.push_str(&line);
-                text.push('\n');
+                lines.push(line);
             }
         }
+        // One line, so a keyword can match across the game's line break.
+        let text = lines.join(" ");
         Ok(if self.language == "zh-CN" { crate::matcher::keep_cjk_only(&text) } else { text })
     }
 
