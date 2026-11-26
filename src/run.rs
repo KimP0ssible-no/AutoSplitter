@@ -272,6 +272,11 @@ pub fn fmt_time(seconds: f64) -> String {
     format!("{}:{:02}.{:03}", ms / 60_000, ms / 1000 % 60, ms % 1000)
 }
 
+/// A time typed as "M:SS.mmm", "H:MM:SS.mmm" or plain seconds; None if it is none of these.
+pub fn parse_time(s: &str) -> Option<f64> {
+    s.trim().split(':').try_fold(0.0, |acc: f64, part| part.trim().parse::<f64>().ok().filter(|v| *v >= 0.0).map(|v| acc * 60.0 + v))
+}
+
 /// OCR text on one line, for the log and the preview.
 pub fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -390,6 +395,12 @@ mod tests {
         assert!(!offer_pb(Some(500.0), 510.0, 120.0));
         assert_eq!(fmt_time(354.0), "5:54.000");
         assert_eq!(fmt_time(44.8), "0:44.800");
+        assert_eq!(parse_time("1:13.456"), Some(73.456));
+        assert_eq!(parse_time("73.456"), Some(73.456));
+        assert_eq!(parse_time("1:02:03.5"), Some(3723.5));
+        assert_eq!(parse_time(fmt_time(354.0).as_str()), Some(354.0));
+        assert_eq!(parse_time("abc"), None);
+        assert_eq!(parse_time("-5"), None);
         let mut bgra = vec![0u8; 10 * 10 * 4];
         assert!(crop_bright(&bgra, 10, 10, 40, [0, 0, 10, 10]).is_none());
         bgra.fill(255);

@@ -401,8 +401,8 @@ jobs:
             cat changes.md
           } > notes.md
           cat notes.md
-      # For autosplitter.attr.ee: AutoSplitter 1.x reads version.json there
-      # and installs the zip it names, so 1.x users move to this release.
+      # The update check of 2.x reads version.json on GitHub Pages; the same
+      # file on autosplitter.attr.ee moved 1.x installs to 2.0.0.
       - name: version.json for 1.x installs
         run: |
           v="${GITHUB_REF_NAME#v}"
@@ -414,3 +414,42 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AutoSplitter ${GITHUB_REF_NAME#v}" --notes-file notes.md release/* version.json
+      # The Pages site: version.json for the update check, and a page that
+      # points to the repository.
+      - name: Pages site
+        run: |
+          mkdir site
+          cp version.json packaging/site/index.html site/
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url || steps.retry.outputs.page_url || steps.last.outputs.page_url }}
+    # Pages deployments sometimes stall in syncing_files until the action's
+    # 10-minute cap; a cancelled attempt is usually followed by one that goes
+    # through, so three 4-minute attempts instead of one 10-minute one.
+    steps:
+      - id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 240000
+      - id: retry
+        if: steps.deploy.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 240000
+      - id: last
+        if: steps.retry.outcome == 'failure'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 240000
