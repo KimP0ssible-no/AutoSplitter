@@ -6,6 +6,7 @@ use autosplitter::ocr::{self, Ocr};
 use autosplitter::profile::{Profile, Segment};
 use autosplitter::run::{crop_bright, one_line};
 use autosplitter::ui::EditorWindow;
+use autosplitter::dialog::tell;
 use autosplitter::{paths, picker};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use std::cell::RefCell;
@@ -144,7 +145,8 @@ fn apply_segment(ed: &mut Editor) {
     ed.segments.set_row_data(i, segment_labels(&ed.profile.segments).swap_remove(i));
 }
 
-fn save(ed: &Shared, choose: bool) -> bool {
+/// Saves to the profile's file, or to one the user picks; false if nothing was saved.
+async fn save(ed: Shared, choose: bool) -> bool {
     {
         let mut e = ed.borrow_mut();
         apply_segment(&mut e);
@@ -161,16 +163,17 @@ fn save(ed: &Shared, choose: bool) -> bool {
         }
     };
     if let Some(p) = problem {
-        rfd::MessageDialog::new().set_title("Save").set_description(p).show();
+        tell("Save", p);
         return false;
     }
-    let path = match ed.borrow().path.clone() {
+    let current = ed.borrow().path.clone();
+    let path = match current {
         Some(p) if !choose => p,
         current => {
-            let dialog = rfd::FileDialog::new().set_directory(paths::profiles_dir()).add_filter("Profile", &["xml"]);
             let name = current.as_ref().and_then(|p| p.file_name()).map_or("new_profile.xml".into(), |n| n.to_string_lossy().into_owned());
-            match dialog.set_file_name(name).save_file() {
-                Some(p) => p,
+            let dialog = rfd::AsyncFileDialog::new().set_directory(paths::profiles_dir()).add_filter("Profile", &["xml"]).set_file_name(name);
+            match dialog.save_file().await {
+                Some(p) => p.path().to_path_buf(),
                 None => return false,
             }
         }
@@ -187,30 +190,33 @@ fn save(ed: &Shared, choose: bool) -> bool {
             true
         }
         Err(err) => {
-            rfd::MessageDialog::new().set_title("Save").set_description(format!("{}: {err}", path.display())).set_level(rfd::MessageLevel::Error).show();
+            tell("Save", &format!("{}: {err}", path.display()));
             false
         }
     }
 }
 
+/// True when the form differs from the saved profile.
+fn changed(ed: &Shared) -> bool {
+    let mut e = ed.borrow_mut();
+    apply_segment(&mut e);
+    read(&mut e);
+    e.profile != e.saved
+}
+
 /// False when the user cancels; asks first if there are unsaved changes.
-fn may_discard(ed: &Shared) -> bool {
-    let changed = {
-        let mut e = ed.borrow_mut();
-        apply_segment(&mut e);
-        read(&mut e);
-        e.profile != e.saved
-    };
-    if !changed {
+async fn may_discard(ed: Shared) -> bool {
+    if !changed(&ed) {
         return true;
     }
-    let answer = rfd::MessageDialog::new()
+    let answer = rfd::AsyncMessageDialog::new()
         .set_title("Unsaved changes")
         .set_description("Save the changes to this profile?")
         .set_buttons(rfd::MessageButtons::YesNoCancel)
-        .show();
+        .show()
+        .await;
     match answer {
-        rfd::MessageDialogResult::Yes => save(ed, false),
+        rfd::MessageDialogResult::Yes => save(ed, false).await,
         rfd::MessageDialogResult::No => true,
         _ => false,
     }
@@ -226,7 +232,7 @@ fn open(ed: &Shared, path: PathBuf) {
             show(&mut e);
         }
         Err(err) => {
-            rfd::MessageDialog::new().set_title("Open").set_description(format!("{}: {err}", path.display())).set_level(rfd::MessageLevel::Error).show();
+            tell("Open", &format!("{}: {err}", path.display()));
         }
     }
 }
@@ -302,30 +308,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let e = ed.clone();
     ui.on_new_file(move || {
-        if may_discard(&e) {
-            let mut ed = e.borrow_mut();
-            ed.profile = Profile::new_template("", "");
-            ed.saved = ed.profile.clone();
-            ed.path = None;
-            show(&mut ed);
-        }
+        let e = e.clone();
+        let _ = slint::spawn_local(async move {
+            if may_discard(e.clone()).await {
+                let mut ed = e.borrow_mut();
+                ed.profile = Profile::new_template("", "");
+                ed.saved = ed.profile.clone();
+                ed.path = None;
+                show(&mut ed);
+            }
+        });
     });
     let e = ed.clone();
     ui.on_open_file(move || {
-        if may_discard(&e)
-            && let Some(p) = rfd::FileDialog::new().set_directory(paths::profiles_dir()).add_filter("Profile", &["xml"]).pick_file()
-        {
-            open(&e, p);
-        }
+        let e = e.clone();
+        let _ = slint::spawn_local(async move {
+            if may_discard(e.clone()).await
+                && let Some(p) = rfd::AsyncFileDialog::new().set_directory(paths::profiles_dir()).add_filter("Profile", &["xml"]).pick_file().await
+            {
+                open(&e, p.path().to_path_buf());
+            }
+        });
     });
     let e = ed.clone();
-    ui.on_save(move || {
-        save(&e, false);
-    });
+    ui.on_save(move || drop(slint::spawn_local(save(e.clone(), false))));
     let e = ed.clone();
-    ui.on_save_as(move || {
-        save(&e, true);
-    });
+    ui.on_save_as(move || drop(slint::spawn_local(save(e.clone(), true))));
     let e = ed.clone();
     ui.on_region_edited(move || {
         let ed = e.borrow();
@@ -356,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             e.preview.lock().unwrap_or_else(|e| e.into_inner()).0 = r;
         });
         if let Err(err) = picked {
-            rfd::MessageDialog::new().set_title("Set Region").set_description(err).show();
+            tell("Set Region", &err);
         }
     });
 
@@ -448,7 +456,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let e = ed.clone();
-    ui.window().on_close_requested(move || if may_discard(&e) { slint::CloseRequestResponse::HideWindow } else { slint::CloseRequestResponse::KeepWindowShown });
+    ui.window().on_close_requested(move || {
+        if !changed(&e) {
+            return slint::CloseRequestResponse::HideWindow;
+        }
+        // Open until the question is answered; then the editor quits, or stays on Cancel.
+        let e = e.clone();
+        let _ = slint::spawn_local(async move {
+            if may_discard(e).await {
+                let _ = slint::quit_event_loop();
+            }
+        });
+        slint::CloseRequestResponse::KeepWindowShown
+    });
 
     ui.run()?;
     Ok(())
