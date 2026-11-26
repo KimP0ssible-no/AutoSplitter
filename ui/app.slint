@@ -172,6 +172,8 @@ export component MainWindow inherits Window {
     in property <string> ocr-text;
     in property <string> ocr-ms;
     in property <[string]> log;
+    // A finished run's PB offer; empty when there is none.
+    in property <string> pb-offer;
 
     callback start();
     callback reset();
@@ -187,6 +189,8 @@ export component MainWindow inherits Window {
     callback bind-key();
     callback overlay-changed();
     callback debug-changed();
+    callback save-pb();
+    callback discard-pb();
 
     VerticalLayout {
         padding: 12px;
@@ -224,6 +228,22 @@ export component MainWindow inherits Window {
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
+            }
+        }
+
+        // In the window, not a message box: a box opened while the game has focus hides
+        // behind it and blocks the app until it is answered.
+        if root.pb-offer != "": Rectangle {
+            background: Theme.gold.with-alpha(0.14);
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.gold;
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                Text { text: root.pb-offer; color: Theme.text; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                Button { text: "Save PB"; primary: true; clicked => { root.save-pb(); } }
+                Button { text: "Discard"; clicked => { root.discard-pb(); } }
             }
         }
 

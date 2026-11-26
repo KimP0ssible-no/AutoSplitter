@@ -8,6 +8,7 @@ use autosplitter::ocr::{self, Ocr};
 use autosplitter::profile::Profile;
 use autosplitter::run::{self, Detector, Event, State, fmt_time, one_line};
 use autosplitter::ui::{MainWindow, Overlay, Row};
+use autosplitter::dialog::{ask, tell};
 use autosplitter::{paths, picker, update};
 use slint::{ComponentHandle, Model, ModelRc, PhysicalPosition, SharedString, VecModel};
 use std::cell::RefCell;
@@ -213,6 +214,8 @@ struct App {
     start: Option<f64>,
     running: bool,
     binding: bool,
+    /// A finished run's total and segment times, until the user saves or discards them.
+    pb_offer: Option<(f64, Vec<Option<f64>>)>,
 }
 
 type Shared = Rc<RefCell<App>>;
@@ -227,13 +230,6 @@ fn log(app: &Shared, line: &str) {
     }
 }
 
-fn ask(title: &str, text: &str) -> bool {
-    rfd::MessageDialog::new().set_title(title).set_description(text).set_buttons(rfd::MessageButtons::YesNo).show() == rfd::MessageDialogResult::Yes
-}
-
-fn tell(title: &str, text: &str) {
-    rfd::MessageDialog::new().set_title(title).set_description(text).set_level(rfd::MessageLevel::Error).show();
-}
 
 fn set_clock(app: &App, text: &str, gold: bool) {
     let Some(ui) = app.ui.upgrade() else { return };
@@ -382,6 +378,11 @@ fn start(app: &Shared) {
         return;
     }
     read_settings(&mut a);
+    // A new run drops an unanswered PB offer.
+    a.pb_offer = None;
+    if let Some(ui) = a.ui.upgrade() {
+        ui.set_pb_offer("".into());
+    }
     show_segments(&a);
     a.running = true;
     a.start = None;
@@ -491,24 +492,45 @@ fn run_complete(app: &Shared, total: f64, times: Vec<Option<f64>>) {
         }
         return;
     }
-    let text = format!("Run completed in {}\nPrevious PB: {}\n\nSave new Personal Best times?", fmt_time(total), previous.map_or("none".into(), fmt_time));
-    if ask("New Personal Best!", &text) {
-        {
-            let mut a = app.borrow_mut();
-            run::apply_pb(&mut a.profile, &times);
-        }
-        save(app);
-        let a = app.borrow();
-        show_segments(&a);
-        set_clock(&a, &fmt_time(total), true);
+    let text = match previous {
+        Some(p) => format!("New personal best {} (previous {}). Save it to the profile?", fmt_time(total), fmt_time(p)),
+        None => format!("First complete run: {}. Save it as the personal best?", fmt_time(total)),
+    };
+    let mut a = app.borrow_mut();
+    a.pb_offer = Some((total, times));
+    if let Some(ui) = a.ui.upgrade() {
+        ui.set_pb_offer(text.into());
     }
+}
+
+/// Answers the PB offer of the last run.
+fn answer_pb(app: &Shared, keep: bool) {
+    let offer = app.borrow_mut().pb_offer.take();
+    if let Some(ui) = app.borrow().ui.upgrade() {
+        ui.set_pb_offer("".into());
+    }
+    let Some((total, times)) = offer else { return };
+    if !keep {
+        return log(app, "[INFO] PB not saved");
+    }
+    run::apply_pb(&mut app.borrow_mut().profile, &times);
+    save(app);
+    let a = app.borrow();
+    show_segments(&a);
+    set_clock(&a, &fmt_time(total), true);
 }
 
 fn offer_update(app: &Shared, tag: &str, notes: &str) {
     let text = format!("AutoSplitter {tag} is available (you have {VERSION}).\n\nWhat's new:\n{notes}\n\nUpdate now?");
-    if !ask("Update available", &text) {
-        return;
-    }
+    let (app, tag) = (app.clone(), tag.to_string());
+    ask("Update available", &text, move |yes| {
+        if yes {
+            install_update(&app, &tag);
+        }
+    });
+}
+
+fn install_update(app: &Shared, tag: &str) {
     let kind = update::InstallKind::of(&paths::exe_dir());
     if kind == update::InstallKind::Manual {
         let _ = update::shell_open(std::path::Path::new(&format!("{}/tag/{tag}", update::RELEASES)), "");
@@ -617,6 +639,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         start: None,
         running: false,
         binding: false,
+        pb_offer: None,
     }));
     log(&app, &format!("[INFO] AutoSplitter {VERSION}, profiles in {}", profiles.display()));
 
@@ -670,6 +693,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let a = app.clone();
     ui.on_overlay_changed(move || show_overlay(&a.borrow()));
+    let a = app.clone();
+    ui.on_save_pb(move || answer_pb(&a, true));
+    let a = app.clone();
+    ui.on_discard_pb(move || answer_pb(&a, false));
     let o = overlay.as_weak();
     overlay.on_drag(move || {
         use slint::winit_030::WinitWindowAccessor;
@@ -722,38 +749,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let a = app.clone();
     ui.on_browse(move || {
-        let Some(file) = rfd::FileDialog::new().add_filter("Profile", &["xml"]).pick_file() else { return };
-        let dir = paths::profiles_dir();
-        let target = dir.join(file.file_name().unwrap_or_default());
-        if file.parent() != Some(dir.as_path()) {
-            if target.exists() {
-                return tell("Browse", &format!("{} already exists in the profile folder.", target.display()));
+        let a = a.clone();
+        let _ = slint::spawn_local(async move {
+            let Some(file) = rfd::AsyncFileDialog::new().add_filter("Profile", &["xml"]).pick_file().await else { return };
+            let file = file.path().to_path_buf();
+            let dir = paths::profiles_dir();
+            let target = dir.join(file.file_name().unwrap_or_default());
+            if file.parent() != Some(dir.as_path()) {
+                if target.exists() {
+                    return tell("Browse", &format!("{} already exists in the profile folder.", target.display()));
+                }
+                if let Err(e) = std::fs::copy(&file, &target) {
+                    return tell("Browse", &e.to_string());
+                }
             }
-            if let Err(e) = std::fs::copy(&file, &target) {
-                return tell("Browse", &e.to_string());
-            }
-        }
-        refresh(&a, Some(target));
+            refresh(&a, Some(target));
+        });
     });
     let a = app.clone();
     ui.on_new_profile(move || {
-        let Some(file) = rfd::FileDialog::new().set_directory(paths::profiles_dir()).set_file_name("new_profile.xml").add_filter("Profile", &["xml"]).save_file() else { return };
-        let mission = file.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        if let Err(e) = Profile::new_template("Game", &mission).save(&file) {
-            return tell("New profile", &e.to_string());
-        }
-        refresh(&a, Some(file.clone()));
-        open_editor(&a, &file);
+        let a = a.clone();
+        let _ = slint::spawn_local(async move {
+            let dialog = rfd::AsyncFileDialog::new().set_directory(paths::profiles_dir()).set_file_name("new_profile.xml").add_filter("Profile", &["xml"]);
+            let Some(file) = dialog.save_file().await else { return };
+            let file = file.path().to_path_buf();
+            let mission = file.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            if let Err(e) = Profile::new_template("Game", &mission).save(&file) {
+                return tell("New profile", &e.to_string());
+            }
+            refresh(&a, Some(file.clone()));
+            open_editor(&a, &file);
+        });
     });
     let a = app.clone();
     ui.on_delete_profile(move || {
         let Some(path) = a.borrow().path.clone() else { return };
-        if ask("Delete profile", &format!("Delete {}?\nIts personal bests are deleted too.", path.display())) {
-            match std::fs::remove_file(&path) {
-                Ok(()) => refresh(&a, None),
-                Err(e) => tell("Delete profile", &e.to_string()),
+        let a = a.clone();
+        ask("Delete profile", &format!("Delete {}?\nIts personal bests are deleted too.", path.display()), move |yes| {
+            if yes {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => refresh(&a, None),
+                    Err(e) => tell("Delete profile", &e.to_string()),
+                }
             }
-        }
+        });
     });
     ui.window().on_close_requested(|| {
         let _ = slint::quit_event_loop();

@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod dialog;
 pub mod input;
 pub mod livesplit;
 pub mod matcher;
