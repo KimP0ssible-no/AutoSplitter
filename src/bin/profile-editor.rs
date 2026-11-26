@@ -4,7 +4,7 @@
 use autosplitter::capture::Capture;
 use autosplitter::ocr::{self, Ocr};
 use autosplitter::profile::{Profile, Segment};
-use autosplitter::run::{crop_bright, one_line};
+use autosplitter::run::{crop_bright, fmt_time, one_line, parse_time};
 use autosplitter::ui::EditorWindow;
 use autosplitter::dialog::tell;
 use autosplitter::{paths, picker};
@@ -42,7 +42,7 @@ fn texts(model: &VecModel<StandardListViewItem>) -> Vec<String> {
     model.iter().map(|i| i.text.to_string()).collect()
 }
 
-/// "Name · blocked 240 s · ends the run": the last segment ends the run when saved.
+/// "Name · PB 5:54.000 · blocked 240 s · ends the run": the last segment ends the run when saved.
 fn segment_labels(segments: &[Segment]) -> Vec<StandardListViewItem> {
     let last = segments.len().saturating_sub(1);
     segments
@@ -50,6 +50,9 @@ fn segment_labels(segments: &[Segment]) -> Vec<StandardListViewItem> {
         .enumerate()
         .map(|(i, s)| {
             let mut label = s.name.clone();
+            if let Some(pb) = s.pb {
+                label += &format!("  \u{b7}  PB {}", fmt_time(pb));
+            }
             if s.pte > 0 {
                 label += &format!("  \u{b7}  blocked {} s", s.pte);
             }
@@ -132,6 +135,7 @@ fn fill_segment(ed: &Editor) {
     let seg = usize::try_from(ed.selected).ok().and_then(|i| ed.profile.segments.get(i));
     ui.set_segment_name(seg.map_or("".into(), |s| s.name.as_str().into()));
     ui.set_segment_pte(seg.map_or("0".into(), |s| s.pte.to_string().into()));
+    ui.set_segment_pb(seg.and_then(|s| s.pb).map_or("".into(), |pb| fmt_time(pb).into()));
     ui.set_segment_keywords(seg.map_or("".into(), |s| s.keywords.join("\n").into()));
 }
 
@@ -141,6 +145,9 @@ fn apply_segment(ed: &mut Editor) {
     let s = &mut ed.profile.segments[i];
     s.name = ui.get_segment_name().trim().to_string();
     s.pte = ui.get_segment_pte().trim().parse().unwrap_or(0);
+    // Empty clears the PB; text that is not a time keeps the old one.
+    let pb = ui.get_segment_pb();
+    s.pb = if pb.trim().is_empty() { None } else { parse_time(&pb).or(s.pb) };
     s.keywords = ui.get_segment_keywords().lines().map(str::trim).filter(|k| !k.is_empty()).map(String::from).collect();
     ed.segments.set_row_data(i, segment_labels(&ed.profile.segments).swap_remove(i));
 }

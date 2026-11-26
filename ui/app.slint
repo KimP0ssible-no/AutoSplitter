@@ -555,6 +555,7 @@ export component EditorWindow inherits Window {
     in-out property <int> segment-current: -1;
     in-out property <string> segment-name;
     in-out property <string> segment-pte: "0";
+    in-out property <string> segment-pb;
     in-out property <string> segment-keywords;
 
     callback new-file();
@@ -727,6 +728,8 @@ export component EditorWindow inherits Window {
                         LineEdit { text <=> root.segment-name; horizontal-stretch: 1; }
                         Text { text: "Blocked for (s)"; vertical-alignment: center; }
                         LineEdit { text <=> root.segment-pte; width: 64px; input-type: number; }
+                        Text { text: "PB"; vertical-alignment: center; }
+                        LineEdit { text <=> root.segment-pb; width: 96px; placeholder-text: "M:SS.mmm"; }
                     }
                     Text { text: "Keywords, one per line. Any one of them matches."; color: Theme.dim; }
                     TextEdit { text <=> root.segment-keywords; vertical-stretch: 1; }

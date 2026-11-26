@@ -91,6 +91,7 @@ fn main() {
             e.set_segment_items(list(&labels));
             e.set_segment_current(1);
             e.set_segment_name(p.segments[1].name.as_str().into());
+            e.set_segment_pb(fmt_time(p.segments[1].pb.unwrap_or(0.0)).into());
             e.set_segment_keywords(p.segments[1].keywords.join("\n").into());
             e.show().unwrap();
             Box::new(e)

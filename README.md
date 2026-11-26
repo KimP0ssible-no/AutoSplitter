@@ -4,6 +4,8 @@ AutoSplitter is a speedrun timer for Windows that splits by itself. It reads the
 
 AutoSplitter runs on its own or sends its splits to [LiveSplit](https://livesplit.org).
 
+The [guide](docs/guide.md) explains every window, setting and profile attribute. The [changelog](CHANGELOG.md) lists what changed in each version, back to 0.1.
+
 ## What it does
 
 - Reads a screen region you choose with OCR (optical character recognition, reading text from an image). It uses the PP-OCR models from PaddleOCR on ONNX Runtime, on the CPU, in about 20 to 50 ms per read.
@@ -28,7 +30,7 @@ The installer keeps your profiles in `%APPDATA%\AutoSplitter\profiles`. The port
 
 ### Update from version 1
 
-Version 1 finds version 2 by itself at its next start. Click Yes in the update message. The update keeps the `profiles` folder and the PBs in it. Files that version 1 needs and version 2 does not, such as `Updater.exe` and the DLL files, stay in the folder. You can delete them.
+AutoSplitter 1.x was published on autosplitter.attr.ee, which now points here. Version 1 finds version 2 by itself at its next start. Click Yes in the update message. The update keeps the `profiles` folder and the PBs in it. Files that version 1 needs and version 2 does not, such as `Updater.exe` and the DLL files, stay in the folder. You can delete them.
 
 ### Make sure that a download is genuine
 
@@ -42,7 +44,7 @@ gh attestation verify <file> --repo KimP0ssible-no/AutoSplitter
 
 ### New versions
 
-At start, AutoSplitter asks GitHub for the newest release with one request to `api.github.com`. The request sends nothing about you or your runs. If a newer version exists, AutoSplitter shows what changed and asks before it installs anything. It installs a download only if the signed `SHA256SUMS` of that release lists it with the same checksum.
+At start, AutoSplitter reads the newest version from `https://kimp0ssible-no.github.io/AutoSplitter/version.json` on GitHub Pages, one request that sends nothing about you or your runs. If a newer version exists, AutoSplitter shows what changed and asks before it installs anything. It installs a download only if the signed `SHA256SUMS` of that release lists it with the same checksum.
 
 ## Set up a run
 
@@ -144,7 +146,11 @@ A committer reviews pull requests from anyone else before they are merged.
 
 ### Privacy policy
 
-This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. There are two exceptions. The update check described under [New versions](#new-versions) is a single request to GitHub that sends nothing about you or your runs. GitHub handles that request under the [GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). If you select LiveSplit, AutoSplitter sends timer commands to the LiveSplit Server address in your profile. Screen images and OCR text stay on your computer.
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. There are two exceptions. The update check described under [New versions](#new-versions) is a single request to GitHub Pages that sends nothing about you or your runs. GitHub handles that request under the [GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). If you select LiveSplit, AutoSplitter sends timer commands to the LiveSplit Server address in your profile. Screen images and OCR text stay on your computer.
+
+## Credits
+
+AutoSplitter is made by [@KimP0ssible](https://github.com/KimP0ssible-no). Thanks to @Summy_the_Dummy, @Bazookas and @Gast for their help with version 1, and to @Copeium for the fix in 1.3.3.
 
 ## Licence
 

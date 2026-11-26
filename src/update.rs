@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const RELEASES: &str = "https://github.com/KimP0ssible-no/AutoSplitter/releases";
-const LATEST_API: &str = "https://api.github.com/repos/KimP0ssible-no/AutoSplitter/releases/latest";
+/// Published by each release (GitHub Pages), in the format 1.x read from autosplitter.attr.ee.
+const LATEST: &str = "https://kimp0ssible-no.github.io/AutoSplitter/version.json";
 
 /// The public half of the key that signs every release's SHA256SUMS.
 pub const RELEASE_KEY: &str = include_str!("../packaging/minisign.pub");
@@ -40,11 +41,16 @@ fn agent(max_redirects: u32) -> ureq::Agent {
 
 /// The newest release: its tag and release notes.
 pub fn latest() -> Result<(String, String), String> {
-    let response = agent(5).get(LATEST_API).header("Accept", "application/vnd.github+json").call().map_err(|e| e.to_string())?;
-    let body = response.into_body().into_with_config().limit(4 << 20).read_to_vec().map_err(|e| e.to_string())?;
-    let json: serde_json::Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    let tag = json["tag_name"].as_str().ok_or("no release found")?.to_string();
-    Ok((tag, json["body"].as_str().unwrap_or_default().to_string()))
+    let response = agent(5).get(LATEST).call().map_err(|e| e.to_string())?;
+    let body = response.into_body().into_with_config().limit(1 << 20).read_to_vec().map_err(|e| e.to_string())?;
+    version_json(&body)
+}
+
+/// The tag and release notes in a version.json: `{"version": "v2.0.0", "url": ..., "changelog": ...}`.
+fn version_json(body: &[u8]) -> Result<(String, String), String> {
+    let json: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    let tag = json["version"].as_str().ok_or("no version in version.json")?.to_string();
+    Ok((tag, json["changelog"].as_str().unwrap_or_default().to_string()))
 }
 
 /// Where downloads wait until they are installed; emptied at the next start.
@@ -222,6 +228,14 @@ pub fn shell_open(program: &Path, _: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_version_json() {
+        let body = br#"{"version":"v2.0.0","url":"https://github.com/x.zip","changelog":"- New\n- Fixed"}"#;
+        assert_eq!(version_json(body), Ok(("v2.0.0".into(), "- New\n- Fixed".into())));
+        assert!(version_json(b"{}").is_err());
+        assert!(version_json(b"<html>").is_err());
+    }
 
     #[test]
     fn versions() {
