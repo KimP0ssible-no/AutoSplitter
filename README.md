@@ -8,7 +8,7 @@ AutoSplitter runs on its own or sends its splits to [LiveSplit](https://livespli
 
 - Reads a screen region you choose with OCR (optical character recognition, reading text from an image). It uses the PP-OCR models from PaddleOCR on ONNX Runtime, on the CPU, in about 20 to 50 ms per read.
 - Matches each segment's keywords with a fuzzy match, so one or two misread letters still match.
-- Times each split from the screen frame that showed the text, not from the moment OCR finished.
+- Times each split from the first captured frame that showed the text, not from the moment OCR read it: within one capture, 200 ms at the default 5 frames per second.
 - Shows the splits, the timer and your personal best (PB) in its window and in an overlay that stays above the game.
 - Sends start, split, skip and reset to LiveSplit Server.
 - Saves your PB in the profile when a run ends, and asks first.

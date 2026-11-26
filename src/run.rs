@@ -6,13 +6,17 @@ use image::RgbImage;
 use std::collections::VecDeque;
 use std::time::Instant;
 
-const RING: usize = 5;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Waiting,
     Running,
     Done,
+}
+
+/// What a matched text triggers.
+enum Hit {
+    Start,
+    Split(usize),
 }
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +31,8 @@ pub enum Event {
 pub struct Detector {
     p: Profile,
     retries: usize,
+    /// Frames kept: one OCR interval of captures, 5 to 30.
+    ring: usize,
     state: State,
     armed: bool,
     current: Option<usize>,
@@ -46,10 +52,11 @@ impl Detector {
         let mut d = Detector {
             p: profile.clone(),
             retries: (profile.retry_frames as usize).min(profile.target_fps.saturating_sub(1) as usize).max(1),
+            ring: ((profile.target_fps as f32 * profile.interval_seconds).ceil() as usize).clamp(5, 30),
             state: State::Waiting,
             armed: false,
             current: None,
-            frames: VecDeque::with_capacity(RING),
+            frames: VecDeque::new(),
             last_ocr: None,
             previous_text: String::new(),
             start: 0.0,
@@ -79,14 +86,16 @@ impl Detector {
     }
 
     /// Takes one captured crop (None when it was too dark to read) and runs OCR when the interval is due.
-    /// OCR tries the newest buffered crops first, and a match uses the time of the crop that matched.
+    /// OCR tries the newest buffered crops first. On a match it goes back through older crops while they
+    /// still show the matched text, and the earliest of them gives the time: within one capture of when
+    /// the text appeared.
     pub fn frame(&mut self, crop: Option<RgbImage>, ts: f64, ocr: &mut dyn FnMut(&RgbImage) -> Option<String>) -> Vec<Event> {
         let mut events = Vec::new();
         if !self.p.ocr_enabled {
             return events;
         }
         if let Some(c) = crop {
-            if self.frames.len() == RING {
+            if self.frames.len() == self.ring {
                 self.frames.pop_front();
             }
             self.frames.push_back((c, ts));
@@ -105,14 +114,33 @@ impl Detector {
             if newest.is_empty() {
                 (newest, newest_ms) = (text.clone(), ms);
             }
-            if self.changed(&text) && self.check(&text, frame_ts, &mut events) {
-                self.previous_text.clear();
-                (newest, newest_ms, matched) = (text, ms, true);
-                if self.debug && age > 0 {
-                    events.push(Event::Log(format!("[DEBUG] Matched on a frame {age} capture(s) older")));
-                }
-                break;
+            if !self.changed(&text) {
+                continue;
             }
+            let Some(hit) = self.hit(&text, frame_ts) else { continue };
+            let (mut first, mut first_ts) = (age, frame_ts);
+            for older in age + 1..self.frames.len() {
+                let (image, t) = &self.frames[self.frames.len() - 1 - older];
+                let t = *t;
+                match ocr(image) {
+                    Some(o) if self.shows(&hit, &o, t) => (first, first_ts) = (older, t),
+                    _ => break,
+                }
+            }
+            if self.debug && first > 0 {
+                events.push(Event::Log(format!("[DEBUG] The text first showed {first} capture(s) back")));
+            }
+            match hit {
+                Hit::Start => {
+                    self.state = State::Running;
+                    (self.start, self.last_split) = (first_ts, first_ts);
+                    events.push(Event::Started { text: text.clone() });
+                }
+                Hit::Split(index) => self.split(index, index - self.current.map_or(0, |c| c + 1), first_ts, false, &mut events),
+            }
+            self.previous_text.clear();
+            (newest, newest_ms, matched) = (text, ms, true);
+            break;
         }
         if !matched && !newest.is_empty() && self.changed(&newest) {
             self.previous_text = newest.clone();
@@ -130,33 +158,36 @@ impl Detector {
         self.state == State::Running || fuzzy_ratio(text, &self.previous_text) < self.p.change_threshold
     }
 
-    fn check(&mut self, text: &str, ts: f64, events: &mut Vec<Event>) -> bool {
-        let t = self.p.match_threshold;
-        let any = |keys: &[String]| keys.iter().any(|k| fuzzy_contains(text, k, t));
+    fn any(&self, text: &str, keys: &[String]) -> bool {
+        keys.iter().any(|k| fuzzy_contains(text, k, self.p.match_threshold))
+    }
+
+    /// What `text`, captured at `ts`, triggers. A <From> keyword only arms the start, which has no time.
+    fn hit(&mut self, text: &str, ts: f64) -> Option<Hit> {
         match self.state {
             State::Waiting if !self.armed => {
                 // The <To> check waits for a later pass than the one that matched <From>.
-                self.armed = any(&self.p.start_from);
-                false
+                self.armed = self.any(text, &self.p.start_from);
+                None
             }
-            State::Waiting if any(&self.p.start_to) => {
-                self.state = State::Running;
-                (self.start, self.last_split) = (ts, ts);
-                events.push(Event::Started { text: text.to_string() });
-                true
-            }
+            State::Waiting => self.any(text, &self.p.start_to).then_some(Hit::Start),
             State::Running if !self.last_manual.is_some_and(|m| ts - m < f64::from(self.p.cooldown_seconds)) => {
-                let elapsed = ts - self.start;
                 let next = self.current.map_or(0, |c| c + 1);
-                let found = (next..self.p.segments.len()).find(|&i| {
-                    let s = &self.p.segments[i];
-                    elapsed >= f64::from(s.pte) && any(&s.keywords)
-                });
-                let Some(index) = found else { return false };
-                self.split(index, index - next, ts, false, events);
-                true
+                (next..self.p.segments.len()).find(|&i| self.shows(&Hit::Split(i), text, ts)).map(Hit::Split)
             }
-            _ => false,
+            _ => None,
+        }
+    }
+
+    /// True when `text`, captured at `ts`, shows `hit`: its keywords, and for a split a time after the
+    /// last split that is past the segment's block time (pte).
+    fn shows(&self, hit: &Hit, text: &str, ts: f64) -> bool {
+        match *hit {
+            Hit::Start => self.any(text, &self.p.start_to),
+            Hit::Split(i) => {
+                let s = &self.p.segments[i];
+                ts > self.last_split && ts - self.start >= f64::from(s.pte) && self.any(text, &s.keywords)
+            }
         }
     }
 
@@ -264,23 +295,26 @@ mod tests {
         }
     }
 
-    fn feed(d: &mut Detector, text: &str, ts: f64) -> Vec<Event> {
-        let img = RgbImage::new(1, 1);
-        d.frame(Some(img), ts, &mut |_| Some(text.to_string())).into_iter().filter(|e| !matches!(e, Event::Ocr { .. })).collect()
+    /// One capture showing `text`; OCR reads each buffered capture's own text.
+    fn feed(d: &mut Detector, shown: &mut Vec<String>, text: &str, ts: f64) -> Vec<Event> {
+        shown.push(text.into());
+        let img = RgbImage::from_pixel(1, 1, image::Rgb([(shown.len() - 1) as u8, 0, 0]));
+        d.frame(Some(img), ts, &mut |i| Some(shown[i.get_pixel(0, 0)[0] as usize].clone())).into_iter().filter(|e| !matches!(e, Event::Ocr { .. })).collect()
     }
 
     #[test]
     fn two_phase_start_skips_and_pte() {
         let mut d = Detector::new(&profile());
-        assert!(feed(&mut d, "enter the estate", 0.0).is_empty(), "To before From must not start");
-        assert!(feed(&mut d, "Normal", 1.0).is_empty());
-        assert_eq!(feed(&mut d, "Enter the Estate", 2.0), vec![Event::Started { text: "Enter the Estate".into() }]);
+        let mut shown = Vec::new();
+        assert!(feed(&mut d, &mut shown, "enter the estate", 0.0).is_empty(), "To before From must not start");
+        assert!(feed(&mut d, &mut shown, "Normal", 1.0).is_empty());
+        assert_eq!(feed(&mut d, &mut shown, "Enter the Estate", 2.0), vec![Event::Started { text: "Enter the Estate".into() }]);
         // pte 240 keeps the final segment closed early in the run.
-        assert!(feed(&mut d, "lovebirds", 3.0).is_empty());
-        let e = feed(&mut d, "tanker", 12.0);
+        assert!(feed(&mut d, &mut shown, "lovebirds", 3.0).is_empty());
+        let e = feed(&mut d, &mut shown, "tanker", 12.0);
         assert_eq!(e[0], Event::Split { index: 1, skipped: 1, segment_time: 10.0, total: 10.0, manual: false });
         assert_eq!(d.times, vec![None, Some(10.0), None]);
-        feed(&mut d, "lovebirds", 300.0);
+        feed(&mut d, &mut shown, "lovebirds", 300.0);
         assert_eq!(d.state(), State::Done);
         assert_eq!(d.times[2], Some(298.0));
 
@@ -295,9 +329,10 @@ mod tests {
         let mut p = profile();
         p.start_from.clear();
         let mut d = Detector::new(&p);
-        assert!(matches!(feed(&mut d, "enter the estate", 0.0)[0], Event::Started { .. }));
+        let mut shown = Vec::new();
+        assert!(matches!(feed(&mut d, &mut shown, "enter the estate", 0.0)[0], Event::Started { .. }));
         // Inside the 1 s OCR interval nothing is read.
-        assert!(feed(&mut d, "courtyard", 0.5).is_empty());
+        assert!(feed(&mut d, &mut shown, "courtyard", 0.5).is_empty());
         assert!(matches!(d.manual_split(2.0)[0], Event::Split { index: 0, manual: true, .. }));
         // Before the start trigger, the split key starts the run.
         let mut w = Detector::new(&profile());
@@ -305,8 +340,8 @@ mod tests {
         assert_eq!((w.state(), w.elapsed(3.0)), (State::Running, 2.0));
         assert!(w.manual_split(2.0).is_empty(), "cooldown");
         assert!(d.manual_split(3.0).is_empty(), "cooldown");
-        assert!(feed(&mut d, "tanker", 4.0).is_empty(), "cooldown blocks OCR splits too");
-        assert!(matches!(feed(&mut d, "tanker", 7.5)[0], Event::Split { index: 1, .. }));
+        assert!(feed(&mut d, &mut shown, "tanker", 4.0).is_empty(), "cooldown blocks OCR splits too");
+        assert!(matches!(feed(&mut d, &mut shown, "tanker", 7.5)[0], Event::Split { index: 1, .. }));
     }
 
     #[test]
@@ -321,6 +356,30 @@ mod tests {
         let e = d.frame(Some(img(2)), 1.0, &mut |i| Some(if i.get_pixel(0, 0)[0] == 1 { "enter the estate" } else { "loading" }.into()));
         assert!(e.contains(&Event::Started { text: "enter the estate".into() }));
         assert_eq!(d.elapsed(1.5), 1.5);
+    }
+
+    #[test]
+    fn times_from_the_first_frame_that_showed_the_text() {
+        let mut p = profile();
+        p.start_from.clear();
+        let mut d = Detector::new(&p);
+        let img = |v| RgbImage::from_pixel(1, 1, image::Rgb([v, 0, 0]));
+        // 5 captures a second; the start text shows from 0.4 on, OCR reads at 0.0 and 1.0.
+        let read = |i: &RgbImage| Some(if i.get_pixel(0, 0)[0] >= 2 { "enter the estate" } else { "loading" }.to_string());
+        for (v, ts) in [(0, 0.0), (1, 0.2), (2, 0.4), (2, 0.6), (2, 0.8)] {
+            d.frame(Some(img(v)), ts, &mut |i| read(i));
+        }
+        assert!(d.frame(Some(img(2)), 1.0, &mut |i| read(i)).contains(&Event::Started { text: "enter the estate".into() }));
+        assert_eq!(d.elapsed(1.5), 1.1, "timed from 0.4, not from the OCR pass at 1.0");
+
+        // A split goes back too, but never to before the start.
+        let read = |i: &RgbImage| Some(if i.get_pixel(0, 0)[0] == 3 { "courtyard" } else { "enter the estate" }.to_string());
+        for (v, ts) in [(2, 1.2), (3, 1.4), (3, 1.6), (3, 1.8)] {
+            d.frame(Some(img(v)), ts, &mut |i| read(i));
+        }
+        let e = d.frame(Some(img(3)), 2.0, &mut |i| read(i));
+        assert!(matches!(e[0], Event::Split { index: 0, .. }));
+        assert!((d.times[0].unwrap() - 1.0).abs() < 1e-9, "split at 1.4, run started at 0.4");
     }
 
     #[test]
